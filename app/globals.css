@@ -1,0 +1,129 @@
+@import "tailwindcss";
+
+@theme {
+  --color-amber-brand: #E8A817;
+  --color-amber-glow: #E8A81740;
+  --color-dark-bg: #050505;
+  --color-dark-card: #0a0a0a;
+  --color-dark-border: #1a1a1a;
+  --color-dark-surface: #111111;
+}
+
+body {
+  background: var(--color-dark-bg);
+  color: #e0e0e0;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* --- Amber glow button --- */
+.btn-generate {
+  background: linear-gradient(135deg, #E8A817 0%, #c4881a 100%);
+  color: #000;
+  font-weight: 700;
+  padding: 16px 48px;
+  border-radius: 12px;
+  font-size: 1.1rem;
+  letter-spacing: 1px;
+  transition: all 0.3s ease;
+  border: none;
+  cursor: pointer;
+  text-transform: uppercase;
+}
+
+.btn-generate:hover:not(:disabled) {
+  box-shadow: 0 0 30px var(--color-amber-glow), 0 0 60px var(--color-amber-glow);
+  transform: translateY(-2px);
+}
+
+.btn-generate:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* --- Progress bar --- */
+.progress-bar {
+  height: 4px;
+  background: var(--color-dark-border);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #E8A817, #f0c040);
+  transition: width 0.5s ease;
+  border-radius: 2px;
+}
+
+/* --- Topic card --- */
+.topic-card {
+  background: var(--color-dark-card);
+  border: 1px solid var(--color-dark-border);
+  border-radius: 12px;
+  padding: 12px 20px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.9rem;
+  color: #aaa;
+}
+
+.topic-card:hover {
+  border-color: #E8A817;
+  color: #E8A817;
+  background: #E8A81708;
+}
+
+.topic-card.selected {
+  border-color: #E8A817;
+  color: #E8A817;
+  background: #E8A81710;
+  box-shadow: 0 0 15px #E8A81715;
+}
+
+/* --- Video player container --- */
+.video-container {
+  background: #000;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--color-dark-border);
+  aspect-ratio: 9/16;
+  max-height: 70vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video-container video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* --- Subtle grain texture --- */
+.grain-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  z-index: 50;
+}
+
+/* --- Pulse animation for generating state --- */
+@keyframes pulse-amber {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.animate-pulse-amber {
+  animation: pulse-amber 2s ease-in-out infinite;
+}
+
+/* --- Spinning loader --- */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
