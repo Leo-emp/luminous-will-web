@@ -62,6 +62,7 @@ const STEPS: StepInfo[] = [
 export default function Home() {
   const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
   const [customTopic, setCustomTopic] = useState("");
+  const [videoFormat, setVideoFormat] = useState<"short" | "long">("short");
   const [state, setState] = useState<GenerationState>("idle");
   const [progress, setProgress] = useState(0);
   const [statusText, setStatusText] = useState("");
@@ -130,6 +131,7 @@ export default function Home() {
 
       const topicToSend = activeTopic || "(Random)";
       const result = await client.predict("/on_generate", {
+        format_choice: videoFormat === "long" ? "Horizontal Long (16:9)" : "Vertical Short (9:16)",
         dropdown_topic: customTopic.trim() ? "(Random)" : (selectedTopic || "(Random)"),
         custom: customTopic.trim() || "",
       });
@@ -195,6 +197,37 @@ export default function Home() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* --- Left: Topic Selection --- */}
           <div>
+            {/* --- Format selector --- */}
+            <div className="mb-6">
+              <h2 className="text-sm font-semibold uppercase tracking-wider mb-3" style={{ color: "#666" }}>
+                Format
+              </h2>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => setVideoFormat("short")}
+                  className={`p-3 rounded-xl border text-sm transition-all ${
+                    videoFormat === "short"
+                      ? "border-[#E8A817] bg-[#E8A817]/10 text-[#E8A817]"
+                      : "border-[#1a1a1a] bg-[#0a0a0a] text-[#666] hover:border-[#333]"
+                  }`}
+                >
+                  <div className="font-semibold">9:16 Short</div>
+                  <div className="text-xs mt-1 opacity-70">60-90s · Reels/TikTok</div>
+                </button>
+                <button
+                  onClick={() => setVideoFormat("long")}
+                  className={`p-3 rounded-xl border text-sm transition-all ${
+                    videoFormat === "long"
+                      ? "border-[#E8A817] bg-[#E8A817]/10 text-[#E8A817]"
+                      : "border-[#1a1a1a] bg-[#0a0a0a] text-[#666] hover:border-[#333]"
+                  }`}
+                >
+                  <div className="font-semibold">16:9 Long</div>
+                  <div className="text-xs mt-1 opacity-70">8-12 min · YouTube</div>
+                </button>
+              </div>
+            </div>
+
             <h2 className="text-sm font-semibold uppercase tracking-wider mb-4" style={{ color: "#666" }}>
               Select Topic
             </h2>
@@ -280,7 +313,7 @@ export default function Home() {
 
             {videoUrl ? (
               <div>
-                <div className="video-container mx-auto" style={{ maxWidth: "360px" }}>
+                <div className="video-container mx-auto" style={{ maxWidth: videoFormat === "long" ? "640px" : "360px" }}>
                   <video src={videoUrl} controls playsInline />
                 </div>
 
@@ -315,7 +348,7 @@ export default function Home() {
             ) : (
               <div
                 className="video-container mx-auto flex flex-col items-center justify-center"
-                style={{ maxWidth: "360px", minHeight: "400px" }}
+                style={{ maxWidth: videoFormat === "long" ? "640px" : "360px", minHeight: videoFormat === "long" ? "360px" : "400px" }}
               >
                 {state === "connecting" || state === "generating" ? (
                   <div className="text-center px-8">
