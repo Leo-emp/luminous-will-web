@@ -1,156 +1,897 @@
 "use client";
 
-import { useState, useEffect } from "react";
+// ─────────────────────────────────────────────────────────────
+//  Luminous Will — Premium Review Dashboard
+//  Rewritten for Task 13: video player, caption tabs,
+//  inline edit, script preview, approve/reject actions.
+//
+//  Brand tokens:
+//    Background:  #000000
+//    Panel:       #1a1a1a
+//    Border:      #333333
+//    Accent:      #E8A817  (amber)
+//    Success:     #22c55e  (green)
+//    Danger:      #ef4444  (red)
+// ─────────────────────────────────────────────────────────────
 
-interface QueueEntry {
-  id: string;
-  format: "short" | "long";
-  topic: string;
-  status: string;
-  created_at: string;
-  thumbnail_path: string;
-  target_platforms: string[];
-  post_results: Record<string, { url: string }>;
+import { useState, useEffect, useRef } from "react";
+
+// ── Types ────────────────────────────────────────────────────
+
+// Shape of a single caption object for one platform
+interface PlatformCaption {
+  caption: string;
+  hashtags?: string[];
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  pending_review: "#E8A817",
-  approved: "#22c55e",
-  posting: "#3b82f6",
-  posted: "#22c55e",
-  rejected: "#ef4444",
-  failed: "#ef4444",
+// Full queue entry returned by /api/queue
+interface QueueEntry {
+  id: string;
+  topic: string;
+  format: "short" | "long";
+  status: "pending_review" | "approved" | "rejected" | "posting" | "posted" | "failed";
+  created_at: string;
+  video_url?: string;
+  thumbnail_url?: string;
+  // Keyed by platform name e.g. { tiktok: {...}, instagram: {...} }
+  captions?: Record<string, PlatformCaption>;
+  script_text?: string;
+  duration?: number;
+  target_platforms?: string[];
+}
+
+// ── Mock data ────────────────────────────────────────────────
+// Used when the API isn't reachable so the page renders standalone
+
+const MOCK_ENTRIES: QueueEntry[] = [
+  {
+    id: "mock-001",
+    topic: "The Power of Silence",
+    format: "short",
+    status: "pending_review",
+    created_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(), // 3h ago
+    video_url: undefined, // no real URL in mock
+    thumbnail_url: undefined,
+    duration: 72,
+    target_platforms: ["tiktok", "instagram", "youtube"],
+    captions: {
+      tiktok: {
+        caption:
+          "Your silence terrifies them. That's the point.\n\nThe most powerful move you can make is simply to stop explaining yourself.",
+        hashtags: ["#darkmotivation", "#silence", "#powerofsilence", "#mindset", "#fyp"],
+      },
+      instagram: {
+        caption:
+          "They expect you to defend yourself. Don't.\n\nSilence is the ultimate power move. Let them fill the void with assumptions.",
+        hashtags: ["#darkmotivation", "#silentpower", "#mindset", "#growthmindset", "#motivation"],
+      },
+      youtube: {
+        caption:
+          "The Power of Silence — Why You Should Stop Explaining Yourself\n\nWhen you stop justifying your actions, you reclaim your power. This video explores the psychology behind strategic silence.",
+        hashtags: ["#darkmotivation", "#selfimprovement", "#stoic", "#mindset"],
+      },
+    },
+    script_text:
+      "The moment you start explaining yourself, you've already lost.\n\nSilence isn't weakness. It's strategy.\n\nEvery word you speak is a card revealed. Every defence you mount is an admission of doubt.\n\nThe powerful don't justify. They act.\n\nYour silence terrifies them because it offers nothing to argue against.\n\nLet them be confused. Let them wonder. Let them fill the void with their own fears.\n\nYou don't owe anyone an explanation for who you are.\n\nStay silent. Stay powerful.",
+  },
+  {
+    id: "mock-002",
+    topic: "Discipline Over Motivation",
+    format: "short",
+    status: "approved",
+    created_at: new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString(), // yesterday
+    duration: 58,
+    target_platforms: ["tiktok", "instagram"],
+    captions: {
+      tiktok: {
+        caption: "Motivation is a visitor. Discipline lives here.",
+        hashtags: ["#discipline", "#darkmotivation", "#consistency", "#fyp"],
+      },
+      instagram: {
+        caption: "Stop waiting to feel ready. Start moving before you're ready.",
+        hashtags: ["#discipline", "#motivation", "#selfimprovement", "#consistency"],
+      },
+    },
+    script_text: "Motivation will abandon you. Discipline won't.\n\nMotivation depends on how you feel. Discipline doesn't care.",
+  },
+  {
+    id: "mock-003",
+    topic: "Why Most People Stay Poor",
+    format: "long",
+    status: "rejected",
+    created_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
+    duration: 420,
+    target_platforms: ["youtube", "facebook"],
+    captions: {
+      youtube: {
+        caption: "The uncomfortable truth about money mindset that schools never teach you.",
+        hashtags: ["#money", "#wealth", "#financialmindset"],
+      },
+      facebook: {
+        caption: "Share this if you know someone who needs to hear this today.",
+        hashtags: ["#motivation", "#money", "#mindset"],
+      },
+    },
+    script_text: "The reason most people stay poor has nothing to do with opportunity...",
+  },
+];
+
+// ── Helpers ──────────────────────────────────────────────────
+
+// Maps status strings to display labels and Tailwind colour tokens
+const STATUS_CONFIG: Record<string, { label: string; textClass: string; bgClass: string }> = {
+  pending_review: { label: "Pending Review", textClass: "text-[#E8A817]", bgClass: "bg-[#E8A817]/10" },
+  approved: { label: "Approved", textClass: "text-[#22c55e]", bgClass: "bg-[#22c55e]/10" },
+  rejected: { label: "Rejected", textClass: "text-[#ef4444]", bgClass: "bg-[#ef4444]/10" },
+  posting: { label: "Posting…", textClass: "text-[#3b82f6]", bgClass: "bg-[#3b82f6]/10" },
+  posted: { label: "Posted", textClass: "text-[#22c55e]", bgClass: "bg-[#22c55e]/10" },
+  failed: { label: "Failed", textClass: "text-[#ef4444]", bgClass: "bg-[#ef4444]/10" },
 };
 
-export default function DashboardPage() {
-  const [entries, setEntries] = useState<QueueEntry[]>([]);
-  const [filter, setFilter] = useState<string>("all");
-  const [loading, setLoading] = useState(true);
+// Formats an ISO date string into e.g. "24 Jun, 3:00 AM"
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
-  useEffect(() => {
-    fetchQueue();
-  }, [filter]);
+// Converts seconds into "1m 12s" human-readable form
+function formatDuration(seconds?: number): string {
+  if (!seconds) return "—";
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
 
-  const fetchQueue = async () => {
-    setLoading(true);
-    const params = filter !== "all" ? `?status=${filter}` : "";
-    const res = await fetch(`/api/queue${params}`);
-    const data = await res.json();
-    setEntries(data);
-    setLoading(false);
+// ── Sub-components ───────────────────────────────────────────
+
+// ── VideoPlayer ──────────────────────────────────────────────
+// HTML5 video element with poster frame fallback to thumbnail
+function VideoPlayer({
+  videoUrl,
+  thumbnailUrl,
+  format,
+}: {
+  videoUrl?: string;
+  thumbnailUrl?: string;
+  format: "short" | "long";
+}) {
+  // Short = 9:16 portrait, Long = 16:9 landscape
+  const isPortrait = format === "short";
+
+  // When no video URL provided, show a styled placeholder
+  if (!videoUrl) {
+    return (
+      <div
+        className={`relative bg-[#0a0a0a] border border-[#333] rounded-xl flex items-center justify-center overflow-hidden ${
+          isPortrait ? "aspect-[9/16] max-w-[200px] mx-auto" : "aspect-video w-full"
+        }`}
+      >
+        {/* Show thumbnail image if available, else placeholder text */}
+        {thumbnailUrl ? (
+          <img
+            src={thumbnailUrl}
+            alt="Thumbnail"
+            className="absolute inset-0 w-full h-full object-cover opacity-60"
+          />
+        ) : null}
+        <div className="relative z-10 text-center px-4">
+          <div className="text-[#E8A817] text-3xl mb-2">▶</div>
+          <p className="text-xs text-[#555] uppercase tracking-wider">
+            {isPortrait ? "9:16 Short" : "16:9 Long"}
+          </p>
+          <p className="text-xs text-[#333] mt-1">No video URL</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    // Responsive aspect-ratio container
+    <div
+      className={`relative rounded-xl overflow-hidden bg-black border border-[#333] ${
+        isPortrait ? "aspect-[9/16] max-w-[220px] mx-auto" : "aspect-video w-full"
+      }`}
+    >
+      <video
+        src={videoUrl}
+        poster={thumbnailUrl}
+        controls
+        preload="metadata"
+        className="absolute inset-0 w-full h-full object-contain"
+      />
+    </div>
+  );
+}
+
+// ── ThumbnailPreview ─────────────────────────────────────────
+// Shows the generated thumbnail at a comfortable viewing size
+function ThumbnailPreview({ thumbnailUrl }: { thumbnailUrl?: string }) {
+  if (!thumbnailUrl) {
+    return (
+      <div className="aspect-video w-full bg-[#0a0a0a] border border-[#333] rounded-xl flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-3xl mb-2">🖼</div>
+          <p className="text-xs text-[#555] uppercase tracking-wider">No Thumbnail</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl overflow-hidden border border-[#333] bg-black">
+      <img
+        src={thumbnailUrl}
+        alt="Video thumbnail"
+        className="w-full h-auto object-cover"
+      />
+    </div>
+  );
+}
+
+// ── CaptionTabs ──────────────────────────────────────────────
+// Tabbed view — one tab per platform — with inline edit mode
+function CaptionTabs({
+  captions,
+  entryId,
+  onSave,
+}: {
+  captions: Record<string, PlatformCaption>;
+  entryId: string;
+  onSave: (entryId: string, platform: string, newCaption: PlatformCaption) => void;
+}) {
+  // List of platform keys in display order
+  const platforms = Object.keys(captions);
+  const [activeTab, setActiveTab] = useState<string>(platforms[0] || "");
+  const [editMode, setEditMode] = useState(false);
+  // Local editable state for the current tab's text
+  const [editText, setEditText] = useState("");
+  const [editHashtags, setEditHashtags] = useState("");
+
+  // When the active tab changes, reset edit fields to that platform's data
+  const activePlatform = captions[activeTab];
+
+  // Human-readable platform labels
+  const PLATFORM_LABELS: Record<string, string> = {
+    tiktok: "TikTok",
+    instagram: "Instagram",
+    youtube: "YouTube",
+    facebook: "Facebook",
   };
 
-  const handleApprove = async (id: string) => {
-    await fetch(`/api/queue/${id}/approve`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) });
-    fetchQueue();
-  };
+  // Enters edit mode and populates the textarea with current values
+  function startEdit() {
+    if (!activePlatform) return;
+    setEditText(activePlatform.caption);
+    setEditHashtags((activePlatform.hashtags || []).join(" "));
+    setEditMode(true);
+  }
 
-  const handleReject = async (id: string) => {
-    await fetch(`/api/queue/${id}/reject`, { method: "POST" });
-    fetchQueue();
-  };
+  // Cancels without saving
+  function cancelEdit() {
+    setEditMode(false);
+  }
 
-  const formatDate = (iso: string) => {
-    const d = new Date(iso);
-    return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
-  };
+  // Saves the edited values back up to parent state
+  function saveEdit() {
+    if (!activePlatform) return;
+    const hashtags = editHashtags
+      .split(/\s+/)
+      .map((h) => h.trim())
+      .filter((h) => h.length > 0);
+    onSave(entryId, activeTab, { caption: editText, hashtags });
+    setEditMode(false);
+  }
+
+  if (platforms.length === 0) {
+    return <p className="text-[#555] text-sm">No captions generated.</p>;
+  }
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-8">
-        <h1 className="text-2xl font-bold" style={{ color: "#E8A817" }}>
-          Review Queue
-        </h1>
-        <div className="flex gap-2">
-          {["all", "pending_review", "approved", "posted", "rejected"].map((s) => (
-            <button
-              key={s}
-              onClick={() => setFilter(s)}
-              className={`px-3 py-1 text-xs uppercase tracking-wider rounded-lg border transition-all ${
-                filter === s
-                  ? "border-[#E8A817] text-[#E8A817] bg-[#E8A817]/10"
-                  : "border-[#1a1a1a] text-[#555] hover:border-[#333]"
-              }`}
-            >
-              {s.replace("_", " ")}
-            </button>
-          ))}
-        </div>
+      {/* Tab row */}
+      <div className="flex gap-1 mb-4 border-b border-[#333] pb-2">
+        {platforms.map((platform) => (
+          <button
+            key={platform}
+            onClick={() => {
+              setActiveTab(platform);
+              setEditMode(false); // reset edit mode when switching tabs
+            }}
+            className={`px-3 py-1.5 text-xs uppercase tracking-wider rounded-t transition-all ${
+              activeTab === platform
+                ? "text-[#E8A817] border border-[#E8A817] bg-[#E8A817]/10"
+                : "text-[#555] border border-transparent hover:text-[#888]"
+            }`}
+          >
+            {PLATFORM_LABELS[platform] || platform}
+          </button>
+        ))}
       </div>
 
-      {loading ? (
-        <div className="text-center py-16 text-[#555]">Loading...</div>
-      ) : entries.length === 0 ? (
-        <div className="text-center py-16">
-          <p className="text-[#555]">No videos in queue</p>
-          <p className="text-xs text-[#333] mt-2">Videos will appear here after scheduled generation</p>
-        </div>
-      ) : (
-        <div className="space-y-4">
-          {entries.map((entry) => (
-            <div
-              key={entry.id}
-              className="p-4 rounded-xl border border-[#1a1a1a] bg-[#0a0a0a] flex items-center gap-4"
-            >
-              <div className="w-24 h-14 bg-[#111] rounded-lg flex-shrink-0 flex items-center justify-center">
-                <span className="text-xs text-[#333]">
-                  {entry.format === "long" ? "16:9" : "9:16"}
-                </span>
+      {/* Caption content for active tab */}
+      {activePlatform && (
+        <div>
+          {editMode ? (
+            // ── Edit mode ──
+            <div className="space-y-3">
+              {/* Caption textarea */}
+              <textarea
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                rows={5}
+                className="w-full bg-[#0a0a0a] border border-[#E8A817]/50 rounded-lg px-3 py-2 text-sm text-white placeholder-[#555] resize-y focus:outline-none focus:border-[#E8A817]"
+                placeholder="Caption text…"
+              />
+              {/* Hashtags input */}
+              <input
+                type="text"
+                value={editHashtags}
+                onChange={(e) => setEditHashtags(e.target.value)}
+                className="w-full bg-[#0a0a0a] border border-[#333] rounded-lg px-3 py-2 text-sm text-[#E8A817] placeholder-[#555] focus:outline-none focus:border-[#E8A817]"
+                placeholder="#hashtag1 #hashtag2 …"
+              />
+              {/* Save / Cancel */}
+              <div className="flex gap-2">
+                <button
+                  onClick={saveEdit}
+                  className="px-4 py-1.5 text-xs uppercase tracking-wider rounded-lg bg-[#E8A817] text-black font-semibold hover:bg-[#d49a14] transition-all"
+                >
+                  Save
+                </button>
+                <button
+                  onClick={cancelEdit}
+                  className="px-4 py-1.5 text-xs uppercase tracking-wider rounded-lg border border-[#333] text-[#555] hover:text-[#888] transition-all"
+                >
+                  Cancel
+                </button>
               </div>
-
-              <div className="flex-1 min-w-0">
-                <h3 className="text-sm font-medium text-white truncate">{entry.topic}</h3>
-                <div className="flex items-center gap-3 mt-1">
-                  <span
-                    className="text-xs uppercase tracking-wider px-2 py-0.5 rounded"
-                    style={{
-                      color: STATUS_COLORS[entry.status] || "#555",
-                      background: `${STATUS_COLORS[entry.status] || "#555"}15`,
-                    }}
-                  >
-                    {entry.status.replace("_", " ")}
-                  </span>
-                  <span className="text-xs text-[#444]">{formatDate(entry.created_at)}</span>
-                  <span className="text-xs text-[#444]">
-                    {entry.target_platforms.join(", ")}
-                  </span>
-                </div>
-              </div>
-
-              {entry.status === "pending_review" && (
-                <div className="flex gap-2 flex-shrink-0">
-                  <button
-                    onClick={() => handleApprove(entry.id)}
-                    className="px-4 py-2 text-xs uppercase tracking-wider rounded-lg bg-[#22c55e]/10 border border-[#22c55e]/30 text-[#22c55e] hover:bg-[#22c55e]/20 transition-all"
-                  >
-                    Approve
-                  </button>
-                  <button
-                    onClick={() => handleReject(entry.id)}
-                    className="px-4 py-2 text-xs uppercase tracking-wider rounded-lg bg-[#ef4444]/10 border border-[#ef4444]/30 text-[#ef4444] hover:bg-[#ef4444]/20 transition-all"
-                  >
-                    Reject
-                  </button>
-                </div>
-              )}
-
-              {entry.status === "posted" && entry.post_results && (
-                <div className="flex gap-2 flex-shrink-0">
-                  {Object.entries(entry.post_results).map(([platform, result]) => (
-                    <a
-                      key={platform}
-                      href={result.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-3 py-1 text-xs uppercase tracking-wider rounded-lg border border-[#1a1a1a] text-[#888] hover:text-[#E8A817] hover:border-[#E8A817] transition-all"
+            </div>
+          ) : (
+            // ── View mode ──
+            <div className="space-y-3">
+              {/* Caption text */}
+              <p className="text-sm text-[#ccc] leading-relaxed whitespace-pre-wrap">
+                {activePlatform.caption}
+              </p>
+              {/* Hashtags displayed as pills */}
+              {activePlatform.hashtags && activePlatform.hashtags.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {activePlatform.hashtags.map((tag) => (
+                    <span
+                      key={tag}
+                      className="text-xs px-2 py-0.5 rounded bg-[#E8A817]/10 text-[#E8A817]"
                     >
-                      {platform}
-                    </a>
+                      {tag}
+                    </span>
                   ))}
                 </div>
               )}
+              {/* Edit button */}
+              <button
+                onClick={startEdit}
+                className="text-xs uppercase tracking-wider text-[#555] hover:text-[#E8A817] transition-colors border border-[#333] hover:border-[#E8A817] px-3 py-1 rounded-lg"
+              >
+                Edit Caption
+              </button>
             </div>
-          ))}
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── ScriptPreview ────────────────────────────────────────────
+// Collapsible section revealing the full script text
+function ScriptPreview({ scriptText }: { scriptText?: string }) {
+  const [open, setOpen] = useState(false);
+
+  if (!scriptText) return null;
+
+  return (
+    <div className="border border-[#333] rounded-xl overflow-hidden">
+      {/* Toggle header */}
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-3 bg-[#1a1a1a] hover:bg-[#222] transition-colors text-left"
+      >
+        <span className="text-xs uppercase tracking-wider text-[#888]">
+          {open ? "▲ Hide Script" : "▶ View Script"}
+        </span>
+        <span className="text-xs text-[#555]">
+          {scriptText.split(/\s+/).length} words
+        </span>
+      </button>
+
+      {/* Expandable content */}
+      {open && (
+        <div className="px-4 py-4 bg-[#0a0a0a]">
+          <p className="text-sm text-[#aaa] leading-relaxed whitespace-pre-wrap font-mono">
+            {scriptText}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── ReviewActions ────────────────────────────────────────────
+// Prominent Approve / Reject buttons with a confirmation step
+function ReviewActions({
+  entry,
+  onApprove,
+  onReject,
+}: {
+  entry: QueueEntry;
+  onApprove: (id: string) => void;
+  onReject: (id: string) => void;
+}) {
+  // Tracks if user has clicked once and is waiting to confirm
+  const [confirming, setConfirming] = useState<"approve" | "reject" | null>(null);
+
+  // Only show action buttons for pending entries
+  if (entry.status !== "pending_review") {
+    const cfg = STATUS_CONFIG[entry.status];
+    return (
+      <div className={`px-4 py-3 rounded-xl border text-center ${cfg?.bgClass} border-[#333]`}>
+        <span className={`text-sm font-semibold uppercase tracking-wider ${cfg?.textClass}`}>
+          {cfg?.label || entry.status}
+        </span>
+      </div>
+    );
+  }
+
+  // First click — show confirmation prompt
+  if (confirming === "approve") {
+    return (
+      <div className="flex gap-3 items-center">
+        <span className="text-sm text-[#888] flex-1">Confirm approval?</span>
+        <button
+          onClick={() => { onApprove(entry.id); setConfirming(null); }}
+          className="flex-1 py-3 rounded-xl bg-[#22c55e] text-black font-bold text-sm uppercase tracking-wider hover:bg-[#16a34a] transition-all"
+        >
+          ✓ Yes, Approve
+        </button>
+        <button
+          onClick={() => setConfirming(null)}
+          className="px-4 py-3 rounded-xl border border-[#333] text-[#555] text-sm hover:text-[#888] transition-all"
+        >
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
+  if (confirming === "reject") {
+    return (
+      <div className="flex gap-3 items-center">
+        <span className="text-sm text-[#888] flex-1">Confirm rejection?</span>
+        <button
+          onClick={() => { onReject(entry.id); setConfirming(null); }}
+          className="flex-1 py-3 rounded-xl bg-[#ef4444] text-white font-bold text-sm uppercase tracking-wider hover:bg-[#dc2626] transition-all"
+        >
+          ✗ Yes, Reject
+        </button>
+        <button
+          onClick={() => setConfirming(null)}
+          className="px-4 py-3 rounded-xl border border-[#333] text-[#555] text-sm hover:text-[#888] transition-all"
+        >
+          Cancel
+        </button>
+      </div>
+    );
+  }
+
+  // Default state — show both big buttons
+  return (
+    <div className="flex gap-3">
+      <button
+        onClick={() => setConfirming("approve")}
+        className="flex-1 py-3.5 rounded-xl bg-[#22c55e]/10 border border-[#22c55e]/40 text-[#22c55e] font-bold text-sm uppercase tracking-wider hover:bg-[#22c55e]/20 hover:border-[#22c55e] transition-all"
+      >
+        ✓ Approve
+      </button>
+      <button
+        onClick={() => setConfirming("reject")}
+        className="flex-1 py-3.5 rounded-xl bg-[#ef4444]/10 border border-[#ef4444]/40 text-[#ef4444] font-bold text-sm uppercase tracking-wider hover:bg-[#ef4444]/20 hover:border-[#ef4444] transition-all"
+      >
+        ✗ Reject
+      </button>
+    </div>
+  );
+}
+
+// ── MetaBadge ────────────────────────────────────────────────
+// Small info pill used in the metadata row
+function MetaBadge({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] uppercase tracking-wider text-[#555]">{label}</span>
+      <span className="text-xs text-[#ccc]">{value}</span>
+    </div>
+  );
+}
+
+// ── ReviewCard ───────────────────────────────────────────────
+// Full expanded review card for the selected queue entry.
+// Shows video, thumbnail, captions, script, and actions.
+function ReviewCard({
+  entry,
+  onApprove,
+  onReject,
+  onCaptionSave,
+}: {
+  entry: QueueEntry;
+  onApprove: (id: string) => void;
+  onReject: (id: string) => void;
+  onCaptionSave: (entryId: string, platform: string, newCaption: PlatformCaption) => void;
+}) {
+  const statusCfg = STATUS_CONFIG[entry.status] || STATUS_CONFIG["pending_review"];
+  const platforms = entry.target_platforms || Object.keys(entry.captions || {});
+
+  return (
+    <div className="bg-[#1a1a1a] border border-[#333] rounded-2xl p-6 space-y-6">
+
+      {/* ── Header row: topic + status badge ── */}
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-xl font-bold text-white leading-tight">{entry.topic}</h2>
+          <p className="text-xs text-[#555] mt-1">{formatDate(entry.created_at)}</p>
+        </div>
+        {/* Status badge */}
+        <span
+          className={`flex-shrink-0 px-3 py-1 rounded-full text-xs uppercase tracking-wider font-semibold ${statusCfg.textClass} ${statusCfg.bgClass} border border-current/20`}
+        >
+          {statusCfg.label}
+        </span>
+      </div>
+
+      {/* ── Metadata row: format, duration, platforms ── */}
+      <div className="flex flex-wrap gap-x-6 gap-y-3 border-t border-[#333] pt-4">
+        <MetaBadge label="Format" value={entry.format === "short" ? "9:16 Short" : "16:9 Long"} />
+        <MetaBadge label="Duration" value={formatDuration(entry.duration)} />
+        <MetaBadge
+          label="Platforms"
+          value={platforms.length > 0 ? platforms.map((p) => p[0].toUpperCase() + p.slice(1)).join(", ") : "—"}
+        />
+        <MetaBadge label="ID" value={entry.id.slice(0, 12) + "…"} />
+      </div>
+
+      {/* ── Media row: video player + thumbnail side-by-side on desktop ── */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Video player */}
+        <div>
+          <p className="text-xs uppercase tracking-wider text-[#555] mb-2">Video Preview</p>
+          <VideoPlayer
+            videoUrl={entry.video_url}
+            thumbnailUrl={entry.thumbnail_url}
+            format={entry.format}
+          />
+        </div>
+        {/* Thumbnail preview */}
+        <div>
+          <p className="text-xs uppercase tracking-wider text-[#555] mb-2">Thumbnail</p>
+          <ThumbnailPreview thumbnailUrl={entry.thumbnail_url} />
+        </div>
+      </div>
+
+      {/* ── Caption tabs ── */}
+      {entry.captions && Object.keys(entry.captions).length > 0 && (
+        <div>
+          <p className="text-xs uppercase tracking-wider text-[#555] mb-3">Platform Captions</p>
+          <div className="bg-[#0f0f0f] border border-[#333] rounded-xl p-4">
+            <CaptionTabs
+              captions={entry.captions}
+              entryId={entry.id}
+              onSave={onCaptionSave}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ── Script preview (collapsible) ── */}
+      {entry.script_text && (
+        <div>
+          <p className="text-xs uppercase tracking-wider text-[#555] mb-3">Script</p>
+          <ScriptPreview scriptText={entry.script_text} />
+        </div>
+      )}
+
+      {/* ── Approve / Reject ── */}
+      <div className="border-t border-[#333] pt-4">
+        <ReviewActions
+          entry={entry}
+          onApprove={onApprove}
+          onReject={onReject}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ── QueueListItem ────────────────────────────────────────────
+// Compact row in the left-side queue list
+function QueueListItem({
+  entry,
+  isSelected,
+  onClick,
+}: {
+  entry: QueueEntry;
+  isSelected: boolean;
+  onClick: () => void;
+}) {
+  const statusCfg = STATUS_CONFIG[entry.status] || STATUS_CONFIG["pending_review"];
+
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full text-left p-3 rounded-xl border transition-all ${
+        isSelected
+          ? "border-[#E8A817] bg-[#E8A817]/5"
+          : "border-[#222] hover:border-[#333] bg-[#0a0a0a]"
+      }`}
+    >
+      {/* Topic title */}
+      <p className={`text-sm font-medium truncate ${isSelected ? "text-[#E8A817]" : "text-white"}`}>
+        {entry.topic}
+      </p>
+      {/* Sub-row: format + date + status */}
+      <div className="flex items-center gap-2 mt-1 flex-wrap">
+        <span className="text-[10px] uppercase tracking-wider text-[#555]">
+          {entry.format === "short" ? "9:16" : "16:9"}
+        </span>
+        <span className="text-[10px] text-[#444]">{formatDate(entry.created_at)}</span>
+        <span className={`text-[10px] uppercase tracking-wider ${statusCfg.textClass}`}>
+          {statusCfg.label}
+        </span>
+      </div>
+    </button>
+  );
+}
+
+// ── Main Page ─────────────────────────────────────────────────
+
+export default function DashboardPage() {
+  // All queue entries loaded from API (or mock fallback)
+  const [entries, setEntries] = useState<QueueEntry[]>([]);
+  // Which entry is currently selected for detailed review
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Status filter for the queue list
+  const [filter, setFilter] = useState<string>("all");
+  // Loading + error states
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // ── Data fetching ──
+  useEffect(() => {
+    loadQueue();
+  }, [filter]);
+
+  async function loadQueue() {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const params = filter !== "all" ? `?status=${filter}` : "";
+      const res = await fetch(`/api/queue${params}`);
+      if (!res.ok) throw new Error(`API returned ${res.status}`);
+      const data: QueueEntry[] = await res.json();
+      setEntries(data);
+      // Auto-select first pending entry if nothing is selected
+      if (!selectedId && data.length > 0) {
+        const firstPending = data.find((e) => e.status === "pending_review");
+        setSelectedId(firstPending?.id || data[0].id);
+      }
+    } catch (err) {
+      // API unavailable — fall back to mock data so UI renders
+      console.warn("API unavailable, using mock data:", err);
+      setEntries(MOCK_ENTRIES);
+      if (!selectedId) {
+        setSelectedId(MOCK_ENTRIES[0].id);
+      }
+      setError("Using mock data — API not reachable");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── Actions ──
+
+  async function handleApprove(id: string) {
+    try {
+      await fetch(`/api/queue/${id}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      // Refresh queue after action
+      loadQueue();
+    } catch {
+      // Optimistically update mock data when API not available
+      setEntries((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, status: "approved" } : e))
+      );
+    }
+  }
+
+  async function handleReject(id: string) {
+    try {
+      await fetch(`/api/queue/${id}/reject`, { method: "POST" });
+      loadQueue();
+    } catch {
+      // Optimistic update for mock mode
+      setEntries((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, status: "rejected" } : e))
+      );
+    }
+  }
+
+  // Saves an edited caption for a specific platform back into local state
+  // (Also sends to API if available — best-effort)
+  function handleCaptionSave(entryId: string, platform: string, newCaption: PlatformCaption) {
+    setEntries((prev) =>
+      prev.map((e) => {
+        if (e.id !== entryId) return e;
+        return {
+          ...e,
+          captions: {
+            ...(e.captions || {}),
+            [platform]: newCaption,
+          },
+        };
+      })
+    );
+
+    // Best-effort persist — fire and forget
+    fetch(`/api/queue/${entryId}/captions`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ platform, ...newCaption }),
+    }).catch(() => {
+      // silently ignore — local state is already updated
+    });
+  }
+
+  // ── Derived data ──
+
+  // Filtered entries for the sidebar queue list
+  const filteredEntries =
+    filter === "all" ? entries : entries.filter((e) => e.status === filter);
+
+  // The currently selected full entry object
+  const selectedEntry = entries.find((e) => e.id === selectedId) || null;
+
+  // Count how many are pending review (badge on the filter button)
+  const pendingCount = entries.filter((e) => e.status === "pending_review").length;
+
+  // ── Render ──
+
+  return (
+    // Page uses full dark background to extend beyond the layout's max-width container
+    <div className="text-white">
+
+      {/* ── Page header ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl font-bold" style={{ color: "#E8A817" }}>
+            Review Queue
+          </h1>
+          {pendingCount > 0 && (
+            <p className="text-sm text-[#555] mt-0.5">
+              {pendingCount} video{pendingCount !== 1 ? "s" : ""} awaiting review
+            </p>
+          )}
+        </div>
+
+        {/* Refresh button */}
+        <button
+          onClick={loadQueue}
+          disabled={loading}
+          className="self-start sm:self-auto px-4 py-2 text-xs uppercase tracking-wider border border-[#333] text-[#555] hover:text-[#E8A817] hover:border-[#E8A817] rounded-lg transition-all disabled:opacity-40"
+        >
+          {loading ? "Loading…" : "↻ Refresh"}
+        </button>
+      </div>
+
+      {/* API error notice (non-blocking) */}
+      {error && (
+        <div className="mb-4 px-4 py-2 border border-[#E8A817]/30 bg-[#E8A817]/5 rounded-lg">
+          <p className="text-xs text-[#E8A817]">⚠ {error}</p>
+        </div>
+      )}
+
+      {/* ── Status filter tabs ── */}
+      <div className="flex flex-wrap gap-2 mb-6">
+        {["all", "pending_review", "approved", "rejected", "posted"].map((s) => {
+          const count = s === "all" ? entries.length : entries.filter((e) => e.status === s).length;
+          return (
+            <button
+              key={s}
+              onClick={() => setFilter(s)}
+              className={`px-3 py-1.5 text-xs uppercase tracking-wider rounded-lg border transition-all ${
+                filter === s
+                  ? "border-[#E8A817] text-[#E8A817] bg-[#E8A817]/10"
+                  : "border-[#222] text-[#444] hover:border-[#333] hover:text-[#888]"
+              }`}
+            >
+              {s.replace(/_/g, " ")}
+              {count > 0 && (
+                <span
+                  className={`ml-1.5 px-1.5 py-0.5 text-[10px] rounded-full ${
+                    filter === s ? "bg-[#E8A817]/20 text-[#E8A817]" : "bg-[#222] text-[#555]"
+                  }`}
+                >
+                  {count}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── Loading state ── */}
+      {loading && (
+        <div className="flex items-center justify-center py-20">
+          <div className="text-center">
+            <div className="text-[#E8A817] text-3xl mb-3 animate-spin inline-block">⌛</div>
+            <p className="text-sm text-[#555] uppercase tracking-wider">Loading queue…</p>
+          </div>
+        </div>
+      )}
+
+      {/* ── Empty state ── */}
+      {!loading && filteredEntries.length === 0 && (
+        <div className="text-center py-20 border border-[#1a1a1a] rounded-2xl">
+          <p className="text-4xl mb-4">📭</p>
+          <p className="text-[#555] uppercase tracking-wider text-sm">No videos in queue</p>
+          <p className="text-xs text-[#333] mt-2">
+            {filter === "all"
+              ? "Videos appear here after scheduled generation"
+              : `No ${filter.replace(/_/g, " ")} entries`}
+          </p>
+        </div>
+      )}
+
+      {/* ── Main layout: queue sidebar + review panel ── */}
+      {!loading && filteredEntries.length > 0 && (
+        <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-6 items-start">
+
+          {/* ── Queue list sidebar ── */}
+          <div className="space-y-2">
+            <p className="text-[10px] uppercase tracking-wider text-[#555] mb-3">
+              {filteredEntries.length} entr{filteredEntries.length === 1 ? "y" : "ies"}
+            </p>
+            {filteredEntries.map((entry) => (
+              <QueueListItem
+                key={entry.id}
+                entry={entry}
+                isSelected={entry.id === selectedId}
+                onClick={() => setSelectedId(entry.id)}
+              />
+            ))}
+          </div>
+
+          {/* ── Full review card ── */}
+          <div>
+            {selectedEntry ? (
+              <ReviewCard
+                entry={selectedEntry}
+                onApprove={handleApprove}
+                onReject={handleReject}
+                onCaptionSave={handleCaptionSave}
+              />
+            ) : (
+              // Fallback when nothing is selected
+              <div className="flex items-center justify-center h-64 border border-[#222] rounded-2xl">
+                <p className="text-[#555] text-sm">Select a video from the list</p>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
