@@ -12,7 +12,9 @@ export async function GET() {
   const redirectUri = `${appUrl}/api/auth/meta/callback`;
 
   // -- Build Meta OAuth URL with scopes for both IG and FB --
+  // pages_show_list is required for /me/accounts to return data
   const scopes = [
+    "pages_show_list",
     "pages_manage_posts",
     "pages_read_engagement",
     "instagram_basic",

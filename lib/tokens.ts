@@ -107,8 +107,17 @@ export async function refreshAccessToken(
         grant_type: "refresh_token",
         refresh_token: tokenData.refresh_token,
       };
+    } else if (platform === "meta") {
+      // Meta doesn't support grant_type=refresh_token —
+      // uses fb_exchange_token with the current access token
+      body = {
+        client_id: clientId,
+        client_secret: clientSecret,
+        grant_type: "fb_exchange_token",
+        fb_exchange_token: tokenData.refresh_token,
+      };
     } else {
-      // YouTube (Google) and Meta use standard OAuth2 params
+      // YouTube (Google) uses standard OAuth2 params
       body = {
         client_id: clientId,
         client_secret: clientSecret,
