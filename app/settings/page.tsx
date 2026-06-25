@@ -156,13 +156,21 @@ export default function SettingsPage() {
             Connect your accounts to enable auto-posting
           </p>
         </div>
-        {/* Back to dashboard link */}
-        <a
-          href="/dashboard"
-          className="px-4 py-2 text-xs uppercase tracking-wider border border-[#333] text-[#555] hover:text-[#E8A817] hover:border-[#E8A817] rounded-lg transition-all"
-        >
-          ← Dashboard
-        </a>
+        {/* Navigation links */}
+        <div className="flex gap-2">
+          <a
+            href="/"
+            className="px-4 py-2 text-xs uppercase tracking-wider border border-[#333] text-[#555] hover:text-[#E8A817] hover:border-[#E8A817] rounded-lg transition-all"
+          >
+            Generator
+          </a>
+          <a
+            href="/dashboard"
+            className="px-4 py-2 text-xs uppercase tracking-wider border border-[#333] text-[#555] hover:text-[#E8A817] hover:border-[#E8A817] rounded-lg transition-all"
+          >
+            Dashboard
+          </a>
+        </div>
       </div>
 
       {/* ── Success/error toast ── */}

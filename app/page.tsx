@@ -180,7 +180,22 @@ export default function Home() {
   return (
     <main className="min-h-screen flex flex-col">
       {/* --- Header --- */}
-      <header className="py-12 text-center">
+      <header className="py-12 text-center relative">
+        {/* Nav links — top right */}
+        <div className="absolute top-6 right-6 flex gap-2">
+          <a
+            href="/dashboard"
+            className="px-4 py-2 text-xs uppercase tracking-wider border border-[#222] text-[#555] hover:text-[#E8A817] hover:border-[#E8A817] rounded-lg transition-all"
+          >
+            Dashboard
+          </a>
+          <a
+            href="/settings"
+            className="px-4 py-2 text-xs uppercase tracking-wider border border-[#222] text-[#555] hover:text-[#E8A817] hover:border-[#E8A817] rounded-lg transition-all"
+          >
+            Settings
+          </a>
+        </div>
         <h1
           className="text-4xl md:text-5xl font-bold tracking-[6px]"
           style={{ color: "#E8A817" }}
