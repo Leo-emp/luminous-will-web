@@ -37,12 +37,28 @@ export async function GET(request: Request) {
 
     const tokens = await tokenResponse.json();
 
+    // -- Fetch the user's display name --
+    let accountName = "TikTok Account";
+    try {
+      const userResponse = await fetch(
+        "https://open.tiktokapis.com/v2/user/info/?fields=display_name,username",
+        { headers: { Authorization: `Bearer ${tokens.access_token}` } }
+      );
+      if (userResponse.ok) {
+        const userData = await userResponse.json();
+        const name = userData?.data?.user?.display_name || userData?.data?.user?.username;
+        if (name) accountName = name;
+      }
+    } catch {
+      // Fallback to default name — not critical
+    }
+
     // -- Save tokens to Blob --
     await saveToken("tiktok", {
       refresh_token: tokens.refresh_token,
       access_token: tokens.access_token,
       expires_at: Math.floor(Date.now() / 1000) + (tokens.expires_in || 86400),
-      account_name: tokens.open_id || "TikTok Account",
+      account_name: accountName,
     });
 
     return NextResponse.redirect(`${appUrl}/settings?connected=tiktok`);

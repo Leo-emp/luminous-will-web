@@ -15,7 +15,7 @@ export async function GET() {
     client_key: clientKey || "",
     redirect_uri: redirectUri,
     response_type: "code",
-    scope: "video.upload,video.publish",
+    scope: "user.info.basic,video.upload,video.publish",
   });
 
   return NextResponse.redirect(`https://www.tiktok.com/v2/auth/authorize/?${params.toString()}`);
