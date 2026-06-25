@@ -18,12 +18,13 @@ export interface QueueEntry {
   video_url?: string;
   thumbnail_url?: string;
   // Platform-specific captions keyed by platform name
-  captions?: Record<string, { caption: string; hashtags?: string[] }>;
+  captions?: Record<string, { caption?: string; description?: string; title?: string; hashtags?: string[]; tags?: string[]; category?: string }>;
   script_text?: string;
   duration?: number;
   target_platforms?: string[];
   scheduled_post_time?: string | null;
-  post_results?: Record<string, { url: string; video_id?: string }>;
+  // Per-platform posting results after publish
+  post_results?: Record<string, { platform: string; success: boolean; url?: string; error?: string; posted_at?: string }>;
   error?: string | null;
 }
 

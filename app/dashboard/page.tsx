@@ -38,6 +38,12 @@ interface QueueEntry {
   script_text?: string;
   duration?: number;
   target_platforms?: string[];
+  // Per-platform posting results after publish
+  post_results?: Record<string, { platform: string; success: boolean; url?: string; error?: string; posted_at?: string }>;
+  // Scheduled post time (ISO string) — null means immediate
+  scheduled_post_time?: string | null;
+  // Summary error message if any platforms failed
+  error?: string | null;
 }
 
 // ── Mock data ────────────────────────────────────────────────
@@ -420,21 +426,128 @@ function ScriptPreview({ scriptText }: { scriptText?: string }) {
   );
 }
 
-// ── ReviewActions ────────────────────────────────────────────
-// Prominent Approve / Reject buttons with a confirmation step
-function ReviewActions({
+// ── PublishActions ───────────────────────────────────────────
+// Approve flow with platform toggles, schedule option, and reject.
+// Replaces the old ReviewActions component.
+function PublishActions({
   entry,
-  onApprove,
+  onPublish,
   onReject,
+  onRetry,
+  connectionStatus,
 }: {
   entry: QueueEntry;
-  onApprove: (id: string) => void;
+  onPublish: (id: string, platforms: string[], scheduledTime?: string) => void;
   onReject: (id: string) => void;
+  onRetry: (id: string) => void;
+  connectionStatus: Record<string, { connected: boolean }>;
 }) {
-  // Tracks if user has clicked once and is waiting to confirm
-  const [confirming, setConfirming] = useState<"approve" | "reject" | null>(null);
+  // Which step of the approve flow we're on
+  const [step, setStep] = useState<"idle" | "selecting" | "confirming-reject">("idle");
+  // Platform toggles — all on by default
+  const [selectedPlatforms, setSelectedPlatforms] = useState<Record<string, boolean>>({
+    youtube: true,
+    tiktok: true,
+    instagram: true,
+    facebook: true,
+  });
+  // Optional scheduled time
+  const [scheduledTime, setScheduledTime] = useState("");
 
-  // Only show action buttons for pending entries
+  // All four platform names for display
+  const allPlatforms = ["youtube", "tiktok", "instagram", "facebook"];
+
+  // Platform display labels
+  const labels: Record<string, string> = {
+    youtube: "YouTube",
+    tiktok: "TikTok",
+    instagram: "Instagram",
+    facebook: "Facebook",
+  };
+
+  // Toggle a platform on/off
+  function togglePlatform(platform: string) {
+    setSelectedPlatforms((prev) => ({ ...prev, [platform]: !prev[platform] }));
+  }
+
+  // Get platforms that are selected AND connected
+  function getActivePlatforms(): string[] {
+    return allPlatforms.filter(
+      (p) => selectedPlatforms[p] && connectionStatus[p === "instagram" || p === "facebook" ? "meta" : p]?.connected
+    );
+  }
+
+  // -- Show post results for posted/failed entries --
+  if (entry.status === "posted" || entry.status === "failed") {
+    const results = entry.post_results || {};
+    return (
+      <div className="space-y-3">
+        <p className="text-xs uppercase tracking-wider text-[#555] mb-2">Post Results</p>
+        {Object.entries(results).map(([platform, result]) => (
+          <div key={platform} className="flex items-center gap-3 px-3 py-2 bg-[#0a0a0a] rounded-lg border border-[#222]">
+            {/* Success/fail indicator */}
+            <span className={`text-sm ${result.success ? "text-[#22c55e]" : "text-[#ef4444]"}`}>
+              {result.success ? "✓" : "✗"}
+            </span>
+            {/* Platform name */}
+            <span className="text-sm text-white flex-1">{labels[platform] || platform}</span>
+            {/* Post URL or error */}
+            {result.success && result.url ? (
+              <a
+                href={result.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-[#E8A817] hover:underline"
+              >
+                View post →
+              </a>
+            ) : result.error ? (
+              <span className="text-xs text-[#ef4444] max-w-[200px] truncate">{result.error}</span>
+            ) : null}
+          </div>
+        ))}
+        {/* Retry button if any failed */}
+        {Object.values(results).some((r) => !r.success) && (
+          <button
+            onClick={() => onRetry(entry.id)}
+            className="w-full py-2.5 rounded-xl bg-[#E8A817]/10 border border-[#E8A817]/40 text-[#E8A817] font-semibold text-sm uppercase tracking-wider hover:bg-[#E8A817]/20 transition-all mt-2"
+          >
+            Retry Failed
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  // -- Show posting spinner --
+  if (entry.status === "posting") {
+    return (
+      <div className="px-4 py-3 rounded-xl border border-[#3b82f6]/30 bg-[#3b82f6]/5 text-center">
+        <span className="text-sm text-[#3b82f6] uppercase tracking-wider animate-pulse">
+          Posting to platforms...
+        </span>
+      </div>
+    );
+  }
+
+  // -- Show scheduled info --
+  if (entry.status === "approved" && entry.scheduled_post_time) {
+    return (
+      <div className="px-4 py-3 rounded-xl border border-[#22c55e]/30 bg-[#22c55e]/5 text-center space-y-2">
+        <span className="text-sm text-[#22c55e] uppercase tracking-wider">
+          Scheduled for {new Date(entry.scheduled_post_time).toLocaleString()}
+        </span>
+        <button
+          onClick={() => onReject(entry.id)}
+          className="text-xs text-[#555] hover:text-[#ef4444] transition-all"
+        >
+          Cancel scheduled post
+        </button>
+      </div>
+    );
+  }
+
+  // -- Non-pending entries: show status badge --
   if (entry.status !== "pending_review") {
     const cfg = STATUS_CONFIG[entry.status];
     return (
@@ -446,39 +559,19 @@ function ReviewActions({
     );
   }
 
-  // First click — show confirmation prompt
-  if (confirming === "approve") {
-    return (
-      <div className="flex gap-3 items-center">
-        <span className="text-sm text-[#888] flex-1">Confirm approval?</span>
-        <button
-          onClick={() => { onApprove(entry.id); setConfirming(null); }}
-          className="flex-1 py-3 rounded-xl bg-[#22c55e] text-black font-bold text-sm uppercase tracking-wider hover:bg-[#16a34a] transition-all"
-        >
-          ✓ Yes, Approve
-        </button>
-        <button
-          onClick={() => setConfirming(null)}
-          className="px-4 py-3 rounded-xl border border-[#333] text-[#555] text-sm hover:text-[#888] transition-all"
-        >
-          Cancel
-        </button>
-      </div>
-    );
-  }
-
-  if (confirming === "reject") {
+  // -- Reject confirmation --
+  if (step === "confirming-reject") {
     return (
       <div className="flex gap-3 items-center">
         <span className="text-sm text-[#888] flex-1">Confirm rejection?</span>
         <button
-          onClick={() => { onReject(entry.id); setConfirming(null); }}
+          onClick={() => { onReject(entry.id); setStep("idle"); }}
           className="flex-1 py-3 rounded-xl bg-[#ef4444] text-white font-bold text-sm uppercase tracking-wider hover:bg-[#dc2626] transition-all"
         >
           ✗ Yes, Reject
         </button>
         <button
-          onClick={() => setConfirming(null)}
+          onClick={() => setStep("idle")}
           className="px-4 py-3 rounded-xl border border-[#333] text-[#555] text-sm hover:text-[#888] transition-all"
         >
           Cancel
@@ -487,17 +580,85 @@ function ReviewActions({
     );
   }
 
-  // Default state — show both big buttons
+  // -- Platform selection step --
+  if (step === "selecting") {
+    const activePlatforms = getActivePlatforms();
+    return (
+      <div className="space-y-4">
+        {/* Platform toggles */}
+        <p className="text-xs uppercase tracking-wider text-[#555]">Select platforms</p>
+        <div className="grid grid-cols-2 gap-2">
+          {allPlatforms.map((platform) => {
+            const provider = platform === "instagram" || platform === "facebook" ? "meta" : platform;
+            const connected = connectionStatus[provider]?.connected;
+            const selected = selectedPlatforms[platform];
+            return (
+              <button
+                key={platform}
+                onClick={() => connected && togglePlatform(platform)}
+                disabled={!connected}
+                className={`py-2 px-3 rounded-lg border text-xs uppercase tracking-wider transition-all ${
+                  !connected
+                    ? "border-[#222] text-[#333] cursor-not-allowed"
+                    : selected
+                    ? "border-[#E8A817] text-[#E8A817] bg-[#E8A817]/10"
+                    : "border-[#333] text-[#555] hover:border-[#555]"
+                }`}
+              >
+                {labels[platform]}
+                {!connected && <span className="block text-[9px] text-[#333] normal-case mt-0.5">Not connected</span>}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Optional schedule picker */}
+        <div>
+          <label className="text-xs text-[#555] uppercase tracking-wider block mb-1">
+            Schedule (optional)
+          </label>
+          <input
+            type="datetime-local"
+            value={scheduledTime}
+            onChange={(e) => setScheduledTime(e.target.value)}
+            className="w-full px-3 py-2 bg-[#0a0a0a] border border-[#333] rounded-lg text-sm text-white focus:border-[#E8A817] focus:outline-none"
+          />
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex gap-3">
+          <button
+            onClick={() => {
+              onPublish(entry.id, activePlatforms, scheduledTime || undefined);
+              setStep("idle");
+            }}
+            disabled={activePlatforms.length === 0}
+            className="flex-1 py-3 rounded-xl bg-[#22c55e] text-black font-bold text-sm uppercase tracking-wider hover:bg-[#16a34a] transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {scheduledTime ? "Schedule" : "Post Now"}
+          </button>
+          <button
+            onClick={() => setStep("idle")}
+            className="px-4 py-3 rounded-xl border border-[#333] text-[#555] text-sm hover:text-[#888] transition-all"
+          >
+            Back
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // -- Default: show Approve & Post + Reject buttons --
   return (
     <div className="flex gap-3">
       <button
-        onClick={() => setConfirming("approve")}
+        onClick={() => setStep("selecting")}
         className="flex-1 py-3.5 rounded-xl bg-[#22c55e]/10 border border-[#22c55e]/40 text-[#22c55e] font-bold text-sm uppercase tracking-wider hover:bg-[#22c55e]/20 hover:border-[#22c55e] transition-all"
       >
-        ✓ Approve
+        ✓ Approve & Post
       </button>
       <button
-        onClick={() => setConfirming("reject")}
+        onClick={() => setStep("confirming-reject")}
         className="flex-1 py-3.5 rounded-xl bg-[#ef4444]/10 border border-[#ef4444]/40 text-[#ef4444] font-bold text-sm uppercase tracking-wider hover:bg-[#ef4444]/20 hover:border-[#ef4444] transition-all"
       >
         ✗ Reject
@@ -522,14 +683,18 @@ function MetaBadge({ label, value }: { label: string; value: string }) {
 // Shows video, thumbnail, captions, script, and actions.
 function ReviewCard({
   entry,
-  onApprove,
+  onPublish,
   onReject,
+  onRetry,
   onCaptionSave,
+  connectionStatus,
 }: {
   entry: QueueEntry;
-  onApprove: (id: string) => void;
+  onPublish: (id: string, platforms: string[], scheduledTime?: string) => void;
   onReject: (id: string) => void;
+  onRetry: (id: string) => void;
   onCaptionSave: (entryId: string, platform: string, newCaption: PlatformCaption) => void;
+  connectionStatus: Record<string, { connected: boolean }>;
 }) {
   const statusCfg = STATUS_CONFIG[entry.status] || STATUS_CONFIG["pending_review"];
   const platforms = entry.target_platforms || Object.keys(entry.captions || {});
@@ -602,12 +767,14 @@ function ReviewCard({
         </div>
       )}
 
-      {/* ── Approve / Reject ── */}
+      {/* ── Approve & Post / Reject ── */}
       <div className="border-t border-[#333] pt-4">
-        <ReviewActions
+        <PublishActions
           entry={entry}
-          onApprove={onApprove}
+          onPublish={onPublish}
           onReject={onReject}
+          onRetry={onRetry}
+          connectionStatus={connectionStatus}
         />
       </div>
     </div>
@@ -666,11 +833,21 @@ export default function DashboardPage() {
   // Loading + error states
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Connection status for platform toggles (loaded from /api/auth/status)
+  const [connectionStatus, setConnectionStatus] = useState<Record<string, { connected: boolean }>>({});
 
   // ── Data fetching ──
   useEffect(() => {
     loadQueue();
   }, [filter]);
+
+  // Load platform connection status for the approve flow toggles
+  useEffect(() => {
+    fetch("/api/auth/status")
+      .then((res) => res.ok ? res.json() : {})
+      .then(setConnectionStatus)
+      .catch(() => {});
+  }, []);
 
   async function loadQueue() {
     setLoading(true);
@@ -702,20 +879,36 @@ export default function DashboardPage() {
 
   // ── Actions ──
 
-  async function handleApprove(id: string) {
+  async function handlePublish(id: string, platforms: string[], scheduledTime?: string) {
     try {
-      await fetch(`/api/queue/${id}/approve`, {
+      // Optimistically set status to posting (or approved for scheduled)
+      setEntries((prev) =>
+        prev.map((e) => (e.id === id ? { ...e, status: scheduledTime ? "approved" : "posting" } : e))
+      );
+      await fetch(`/api/queue/${id}/publish`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({
+          platforms,
+          scheduled_post_time: scheduledTime || null,
+        }),
       });
-      // Refresh queue after action
+      // Refresh to get updated results
       loadQueue();
     } catch {
-      // Optimistically update mock data when API not available
+      loadQueue();
+    }
+  }
+
+  async function handleRetry(id: string) {
+    try {
       setEntries((prev) =>
-        prev.map((e) => (e.id === id ? { ...e, status: "approved" } : e))
+        prev.map((e) => (e.id === id ? { ...e, status: "posting" } : e))
       );
+      await fetch(`/api/queue/${id}/retry`, { method: "POST" });
+      loadQueue();
+    } catch {
+      loadQueue();
     }
   }
 
@@ -788,14 +981,22 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Refresh button */}
-        <button
-          onClick={loadQueue}
-          disabled={loading}
-          className="self-start sm:self-auto px-4 py-2 text-xs uppercase tracking-wider border border-[#333] text-[#555] hover:text-[#E8A817] hover:border-[#E8A817] rounded-lg transition-all disabled:opacity-40"
-        >
-          {loading ? "Loading…" : "↻ Refresh"}
-        </button>
+        {/* Header actions */}
+        <div className="flex gap-2 self-start sm:self-auto">
+          <a
+            href="/settings"
+            className="px-4 py-2 text-xs uppercase tracking-wider border border-[#333] text-[#555] hover:text-[#E8A817] hover:border-[#E8A817] rounded-lg transition-all"
+          >
+            Settings
+          </a>
+          <button
+            onClick={loadQueue}
+            disabled={loading}
+            className="px-4 py-2 text-xs uppercase tracking-wider border border-[#333] text-[#555] hover:text-[#E8A817] hover:border-[#E8A817] rounded-lg transition-all disabled:opacity-40"
+          >
+            {loading ? "Loading…" : "↻ Refresh"}
+          </button>
+        </div>
       </div>
 
       {/* API error notice (non-blocking) */}
@@ -881,9 +1082,11 @@ export default function DashboardPage() {
             {selectedEntry ? (
               <ReviewCard
                 entry={selectedEntry}
-                onApprove={handleApprove}
+                onPublish={handlePublish}
                 onReject={handleReject}
+                onRetry={handleRetry}
                 onCaptionSave={handleCaptionSave}
+                connectionStatus={connectionStatus}
               />
             ) : (
               // Fallback when nothing is selected
