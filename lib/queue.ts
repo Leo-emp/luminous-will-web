@@ -12,6 +12,10 @@ import { put, list } from "@vercel/blob";
 export interface QueueEntry {
   id: string;
   format: "short" | "long";
+  // Content type key: "dark_motivation" | "stoic_philosophy" | "wealth_mindset" | "dark_psychology"
+  content_type?: string;
+  // Accent color from content type — used for UI display
+  accent_color?: string;
   topic: string;
   status: "pending_review" | "approved" | "rejected" | "posting" | "posted" | "failed";
   created_at: string;
