@@ -81,6 +81,50 @@ export default function SettingsPage() {
   // Success toast message from URL params (after OAuth redirect)
   const [toast, setToast] = useState<string | null>(null);
 
+  // Auto-approve toggle for cron-generated videos
+  const [autoApprove, setAutoApproveState] = useState(false);
+  const [autoApproveLoading, setAutoApproveLoading] = useState(true);
+
+  // -- Load auto-approve setting on mount --
+  useEffect(() => {
+    loadAutoApprove();
+  }, []);
+
+  async function loadAutoApprove() {
+    setAutoApproveLoading(true);
+    try {
+      const res = await fetch("/api/settings/auto-approve");
+      if (res.ok) {
+        const data = await res.json();
+        // Apply the persisted setting from the server
+        setAutoApproveState(data.enabled);
+      }
+    } catch {
+      // Default to off if the request fails
+    } finally {
+      setAutoApproveLoading(false);
+    }
+  }
+
+  async function toggleAutoApprove() {
+    // Optimistically flip the toggle before the request completes
+    const newValue = !autoApprove;
+    setAutoApproveState(newValue);
+    try {
+      await fetch("/api/settings/auto-approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: newValue }),
+      });
+      // Show confirmation toast
+      setToast(`Auto-approve ${newValue ? "enabled" : "disabled"}`);
+    } catch {
+      // Revert on failure so UI stays in sync with server state
+      setAutoApproveState(!newValue);
+      setToast("Failed to update auto-approve setting");
+    }
+  }
+
   // -- Load connection status on mount --
   useEffect(() => {
     loadStatus();
@@ -294,6 +338,37 @@ export default function SettingsPage() {
           Instagram and Facebook use the same Meta connection. Connecting one connects both.
           All tokens are stored securely and refresh automatically.
         </p>
+      </div>
+
+      {/* ── Auto-Approve Setting ── */}
+      <div className="mt-6 bg-[#1a1a1a] border border-[#333] rounded-2xl p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-semibold text-white">Auto-Approve Videos</h3>
+            <p className="text-xs text-[#555] mt-1">
+              When enabled, cron-generated videos skip manual review and post automatically
+            </p>
+          </div>
+          {/* Show skeleton while the initial fetch is in flight */}
+          {autoApproveLoading ? (
+            <div className="w-12 h-6 rounded-full bg-[#333] animate-pulse" />
+          ) : (
+            // Toggle button — amber when on, grey when off
+            <button
+              onClick={toggleAutoApprove}
+              className={`relative w-12 h-6 rounded-full transition-colors ${
+                autoApprove ? "bg-[#E8A817]" : "bg-[#333]"
+              }`}
+            >
+              {/* Sliding knob */}
+              <div
+                className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
+                  autoApprove ? "translate-x-6" : "translate-x-0.5"
+                }`}
+              />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
