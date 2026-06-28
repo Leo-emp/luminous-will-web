@@ -35,7 +35,9 @@ export async function GET(request: Request) {
   const authHeader = request.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
 
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  // FIX 1: Use the same pattern as post-scheduled — block if secret is missing OR header mismatch.
+  // The old check (`cronSecret &&`) allowed unauthenticated access when CRON_SECRET was not set.
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -53,6 +55,13 @@ export async function GET(request: Request) {
   const autoApprove = await getAutoApprove();
   const results: { type: string; success: boolean; error?: string }[] = [];
 
+  // FIX 5: Hoist the Gradio import and connection outside the loop.
+  // Previously, Client.connect() was called once per content type, opening a
+  // new WebSocket/HTTP connection each iteration — wasteful and slow.
+  // A single connection handles all predictions for today's batch.
+  const { Client } = await import("@gradio/client");
+  const client = await Client.connect(hfSpaceUrl);
+
   // -- Generate one video per content type --
   for (const typeKey of todaysTypes) {
     try {
@@ -64,11 +73,6 @@ export async function GET(request: Request) {
       }
 
       console.log(`[CRON] Generating ${typeInfo.name} video...`);
-
-      // -- Call the Gradio API --
-      // Dynamic import to avoid bundling @gradio/client in non-cron routes
-      const { Client } = await import("@gradio/client");
-      const client = await Client.connect(hfSpaceUrl);
 
       // Call with content type — topic is "(Random)" so the pipeline picks one
       const result = await client.predict("/on_generate", {

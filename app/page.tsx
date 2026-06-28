@@ -153,9 +153,6 @@ export default function Home() {
   // Switching content type resets selectedTopic (handled in the button onClick)
   const activeTopics = TOPICS_BY_TYPE[contentType];
 
-  // --- Which topic is effectively active (custom overrides selected) ---
-  const activeTopic = customTopic.trim() || selectedTopic;
-
   // --- Timer helpers for tracking elapsed generation time ---
   const startTimer = () => {
     setElapsedTime(0);
@@ -300,7 +297,7 @@ export default function Home() {
           LUMINOUS WILL
         </h1>
         <p className="mt-3 text-sm tracking-[3px] uppercase" style={{ color: "#555" }}>
-          Dark Motivation Video Generator
+          Automated Video Generator
         </p>
       </header>
 
