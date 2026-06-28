@@ -5,16 +5,25 @@
 // ─────────────────────────────────────────────────────────────
 
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { saveToken } from "@/lib/tokens";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const error = url.searchParams.get("error");
+  const state = url.searchParams.get("state");
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
   if (error || !code) {
     return NextResponse.redirect(`${appUrl}/settings?error=tiktok_denied`);
+  }
+
+  // -- Verify CSRF state token --
+  const cookieStore = await cookies();
+  const savedState = cookieStore.get("oauth_state_tiktok")?.value;
+  if (!state || !savedState || state !== savedState) {
+    return NextResponse.redirect(`${appUrl}/settings?error=tiktok_csrf`);
   }
 
   try {
@@ -61,7 +70,9 @@ export async function GET(request: Request) {
       account_name: accountName,
     });
 
-    return NextResponse.redirect(`${appUrl}/settings?connected=tiktok`);
+    const successResponse = NextResponse.redirect(`${appUrl}/settings?connected=tiktok`);
+    successResponse.cookies.delete("oauth_state_tiktok");
+    return successResponse;
   } catch {
     return NextResponse.redirect(`${appUrl}/settings?error=tiktok_failed`);
   }

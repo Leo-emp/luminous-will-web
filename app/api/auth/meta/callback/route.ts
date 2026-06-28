@@ -6,16 +6,25 @@
 // ─────────────────────────────────────────────────────────────
 
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { saveToken } from "@/lib/tokens";
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const code = url.searchParams.get("code");
   const error = url.searchParams.get("error");
+  const state = url.searchParams.get("state");
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
   if (error || !code) {
     return NextResponse.redirect(`${appUrl}/settings?error=meta_denied`);
+  }
+
+  // -- Verify CSRF state token --
+  const cookieStore = await cookies();
+  const savedState = cookieStore.get("oauth_state_meta")?.value;
+  if (!state || !savedState || state !== savedState) {
+    return NextResponse.redirect(`${appUrl}/settings?error=meta_csrf`);
   }
 
   try {
@@ -63,7 +72,9 @@ export async function GET(request: Request) {
       account_name: accountName,
     });
 
-    return NextResponse.redirect(`${appUrl}/settings?connected=meta`);
+    const successResponse = NextResponse.redirect(`${appUrl}/settings?connected=meta`);
+    successResponse.cookies.delete("oauth_state_meta");
+    return successResponse;
   } catch {
     return NextResponse.redirect(`${appUrl}/settings?error=meta_failed`);
   }

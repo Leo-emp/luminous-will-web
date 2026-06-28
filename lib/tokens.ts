@@ -9,7 +9,7 @@
 //    tokens/meta.json       (covers both Instagram and Facebook)
 // ─────────────────────────────────────────────────────────────
 
-import { put, list, del } from "@vercel/blob";
+import { put, list, del, getDownloadUrl } from "@vercel/blob";
 import type { TokenData, PlatformType, ConnectionStatus } from "@/lib/publishers/types";
 
 // -- Blob path prefix for all token files --
@@ -52,7 +52,7 @@ export async function saveToken(platform: PlatformType, data: TokenData): Promis
   // Writes token data to Blob as a JSON file
   const path = `${TOKEN_PREFIX}${platform}.json`;
   await put(path, JSON.stringify(data), {
-    access: "public",
+    access: "private",
     contentType: "application/json",
     addRandomSuffix: false,
   });
@@ -72,11 +72,13 @@ export async function deleteToken(platform: PlatformType): Promise<void> {
 
 async function loadTokenData(platform: PlatformType): Promise<TokenData | null> {
   // Reads token JSON from Blob — returns null if not found
+  // Uses getDownloadUrl for private blob access (tokens are never public)
   try {
     const { blobs } = await list({ prefix: `${TOKEN_PREFIX}${platform}.json` });
     if (blobs.length === 0) return null;
 
-    const response = await fetch(blobs[0].url);
+    const downloadUrl = await getDownloadUrl(blobs[0].url);
+    const response = await fetch(downloadUrl);
     if (!response.ok) return null;
 
     return (await response.json()) as TokenData;
