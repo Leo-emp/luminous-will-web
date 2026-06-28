@@ -181,8 +181,10 @@ export async function retryFailed(entry: QueueEntry): Promise<Record<string, Pos
 }
 
 function buildPublishInput(entry: QueueEntry, platform: string): PublishInput {
-  // Extracts the platform-specific captions from the queue entry
-  // Falls back to topic as title if captions are missing
+  // Extracts the platform-specific captions from the queue entry.
+  // Falls back to topic as title if captions are missing.
+  // content_type is available on the entry (e.g. "dark_motivation") and can
+  // be used by individual platform publishers to enrich titles or descriptions.
   const platformCaptions = entry.captions?.[platform] || {};
 
   return {
@@ -197,6 +199,8 @@ function buildPublishInput(entry: QueueEntry, platform: string): PublishInput {
       category: platformCaptions.category,
     },
     format: entry.format,
+    // Include content type name in topic for richer platform titles
+    // (individual publishers can read entry.content_type for further context)
     topic: entry.topic,
     duration: entry.duration,
   };

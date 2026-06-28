@@ -16,6 +16,12 @@
 
 import { useState, useEffect, useRef } from "react";
 
+// ── Content type lookup maps (Task 14) ───────────────────────
+// Provides display names (e.g. "Dark Motivation") and hex colors
+// for each content type key (e.g. "dark_motivation") — used to
+// render the colored type badge on queue entries.
+import { CONTENT_TYPE_NAMES, CONTENT_TYPE_COLORS } from "@/lib/content-types";
+
 // ── Types ────────────────────────────────────────────────────
 
 // Shape of a single caption object for one platform
@@ -44,6 +50,12 @@ interface QueueEntry {
   scheduled_post_time?: string | null;
   // Summary error message if any platforms failed
   error?: string | null;
+  // Content type key for the video (e.g. "dark_motivation", "stoic_philosophy")
+  // Matches keys in CONTENT_TYPE_NAMES and CONTENT_TYPE_COLORS from lib/content-types
+  content_type?: string;
+  // Accent color hex from the content type — stored on entry for convenience
+  // (can also be derived from CONTENT_TYPE_COLORS[content_type])
+  accent_color?: string;
 }
 
 // ── Mock data ────────────────────────────────────────────────
@@ -55,6 +67,7 @@ const MOCK_ENTRIES: QueueEntry[] = [
     topic: "The Power of Silence",
     format: "short",
     status: "pending_review",
+    content_type: "dark_motivation", // dark amber badge
     created_at: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(), // 3h ago
     video_url: undefined, // no real URL in mock
     thumbnail_url: undefined,
@@ -85,6 +98,7 @@ const MOCK_ENTRIES: QueueEntry[] = [
     topic: "Discipline Over Motivation",
     format: "short",
     status: "approved",
+    content_type: "stoic_philosophy", // blue-grey badge
     created_at: new Date(Date.now() - 26 * 60 * 60 * 1000).toISOString(), // yesterday
     duration: 58,
     target_platforms: ["tiktok", "instagram"],
@@ -105,6 +119,7 @@ const MOCK_ENTRIES: QueueEntry[] = [
     topic: "Why Most People Stay Poor",
     format: "long",
     status: "rejected",
+    content_type: "wealth_mindset", // gold badge
     created_at: new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(),
     duration: 420,
     target_platforms: ["youtube", "facebook"],
@@ -707,6 +722,24 @@ function ReviewCard({
         <div>
           <h2 className="text-xl font-bold text-white leading-tight">{entry.topic}</h2>
           <p className="text-xs text-[#555] mt-1">{formatDate(entry.created_at)}</p>
+          {/* Content type badge — displayed under date in the expanded review card.
+              Uses the same pill style as the queue list item badge for consistency. */}
+          {entry.content_type && (
+            <span
+              className="inline-flex items-center mt-2 px-2 py-0.5 rounded-full text-[10px] font-medium uppercase tracking-wider"
+              style={{
+                // Semi-transparent fill using hex + "15" (8% opacity)
+                backgroundColor: `${CONTENT_TYPE_COLORS[entry.content_type] || "#E8A817"}15`,
+                color: CONTENT_TYPE_COLORS[entry.content_type] || "#E8A817",
+                borderWidth: 1,
+                // "40" appends ~25% opacity border in hex notation
+                borderColor: `${CONTENT_TYPE_COLORS[entry.content_type] || "#E8A817"}40`,
+              }}
+            >
+              {/* Show human-readable name or fall back to raw key */}
+              {CONTENT_TYPE_NAMES[entry.content_type] || entry.content_type}
+            </span>
+          )}
         </div>
         {/* Status badge */}
         <span
@@ -816,6 +849,25 @@ function QueueListItem({
         <span className={`text-[10px] uppercase tracking-wider ${statusCfg.textClass}`}>
           {statusCfg.label}
         </span>
+        {/* Content type badge — colored pill showing content category
+            Color is sourced from CONTENT_TYPE_COLORS via the entry's content_type key.
+            Falls back to amber (#E8A817) if the key is unrecognised. */}
+        {entry.content_type && (
+          <span
+            className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium uppercase tracking-wider"
+            style={{
+              // Semi-transparent fill: hex + "15" appends 8% opacity in hex notation
+              backgroundColor: `${CONTENT_TYPE_COLORS[entry.content_type] || "#E8A817"}15`,
+              color: CONTENT_TYPE_COLORS[entry.content_type] || "#E8A817",
+              borderWidth: 1,
+              // "40" appends ~25% opacity border in hex notation
+              borderColor: `${CONTENT_TYPE_COLORS[entry.content_type] || "#E8A817"}40`,
+            }}
+          >
+            {/* Show human-readable name (e.g. "Dark Motivation") or raw key as fallback */}
+            {CONTENT_TYPE_NAMES[entry.content_type] || entry.content_type}
+          </span>
+        )}
       </div>
     </button>
   );
