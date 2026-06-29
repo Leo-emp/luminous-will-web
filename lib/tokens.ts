@@ -76,7 +76,7 @@ async function loadTokenData(platform: PlatformType): Promise<TokenData | null> 
     const { blobs } = await list({ prefix: `${TOKEN_PREFIX}${platform}.json` });
     if (blobs.length === 0) return null;
 
-    const blob = await get(blobs[0].url);
+    const blob = await get(blobs[0].url, {});
     const text = await blob.text();
     return JSON.parse(text) as TokenData;
   } catch (err) {
