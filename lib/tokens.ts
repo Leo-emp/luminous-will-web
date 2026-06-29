@@ -9,7 +9,7 @@
 //    tokens/meta.json       (covers both Instagram and Facebook)
 // ─────────────────────────────────────────────────────────────
 
-import { put, list, del } from "@vercel/blob";
+import { put, list, del, get } from "@vercel/blob";
 import type { TokenData, PlatformType, ConnectionStatus } from "@/lib/publishers/types";
 
 // -- Blob path prefix for all token files --
@@ -76,15 +76,9 @@ async function loadTokenData(platform: PlatformType): Promise<TokenData | null> 
     const { blobs } = await list({ prefix: `${TOKEN_PREFIX}${platform}.json` });
     if (blobs.length === 0) return null;
 
-    const response = await fetch(blobs[0].url, {
-      headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
-    });
-    if (!response.ok) {
-      console.error(`[TOKENS] fetch failed for ${platform}: ${response.status}`);
-      return null;
-    }
-
-    return (await response.json()) as TokenData;
+    const blob = await get(blobs[0].url);
+    const text = await blob.text();
+    return JSON.parse(text) as TokenData;
   } catch (err) {
     console.error(`[TOKENS] loadTokenData error for ${platform}:`, err);
     return null;
