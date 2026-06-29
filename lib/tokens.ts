@@ -77,17 +77,9 @@ async function loadTokenData(platform: PlatformType): Promise<TokenData | null> 
     if (blobs.length === 0) return null;
 
     const result = await get(blobs[0].url, { access: "private" });
-    if (!result) return null;
-    const reader = result.stream.getReader();
-    const chunks: Uint8Array[] = [];
-    let done = false;
-    while (!done) {
-      const { value, done: d } = await reader.read();
-      if (value) chunks.push(value);
-      done = d;
-    }
-    const text = new TextDecoder().decode(Buffer.concat(chunks));
-    return JSON.parse(text) as TokenData;
+    if (!result || !("stream" in result) || !result.stream) return null;
+    const response = new Response(result.stream as ReadableStream);
+    return (await response.json()) as TokenData;
   } catch (err) {
     console.error(`[TOKENS] loadTokenData error for ${platform}:`, err);
     return null;
