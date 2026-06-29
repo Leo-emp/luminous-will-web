@@ -77,6 +77,7 @@ async function loadTokenData(platform: PlatformType): Promise<TokenData | null> 
     if (blobs.length === 0) return null;
 
     const blob = await get(blobs[0].url, { access: "private" });
+    if (!blob) return null;
     const text = await blob.text();
     return JSON.parse(text) as TokenData;
   } catch (err) {
