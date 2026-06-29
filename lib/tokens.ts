@@ -52,7 +52,7 @@ export async function saveToken(platform: PlatformType, data: TokenData): Promis
   // Writes token data to Blob as a JSON file
   const path = `${TOKEN_PREFIX}${platform}.json`;
   await put(path, JSON.stringify(data), {
-    access: "public",
+    access: "private",
     contentType: "application/json",
     addRandomSuffix: false,
     allowOverwrite: true,
@@ -74,10 +74,11 @@ export async function deleteToken(platform: PlatformType): Promise<void> {
 async function loadTokenData(platform: PlatformType): Promise<TokenData | null> {
   try {
     const { blobs } = await list({ prefix: `${TOKEN_PREFIX}${platform}.json` });
-    console.log(`[TOKENS] list ${platform}: found ${blobs.length} blobs`, blobs.map(b => b.pathname));
     if (blobs.length === 0) return null;
 
-    const response = await fetch(blobs[0].downloadUrl);
+    const response = await fetch(blobs[0].url, {
+      headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
+    });
     if (!response.ok) {
       console.error(`[TOKENS] fetch failed for ${platform}: ${response.status}`);
       return null;
