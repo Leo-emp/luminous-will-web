@@ -74,7 +74,8 @@ export async function GET(request: Request) {
     const successResponse = NextResponse.redirect(`${appUrl}/settings?connected=youtube`);
     successResponse.cookies.delete("oauth_state_youtube");
     return successResponse;
-  } catch {
+  } catch (err) {
+    console.error("[YOUTUBE_CALLBACK] Error:", err);
     return NextResponse.redirect(`${appUrl}/settings?error=youtube_failed`);
   }
 }

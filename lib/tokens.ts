@@ -55,6 +55,7 @@ export async function saveToken(platform: PlatformType, data: TokenData): Promis
     access: "private",
     contentType: "application/json",
     addRandomSuffix: false,
+    allowOverwrite: true,
   });
 }
 
