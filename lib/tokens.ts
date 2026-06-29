@@ -76,9 +76,17 @@ async function loadTokenData(platform: PlatformType): Promise<TokenData | null> 
     const { blobs } = await list({ prefix: `${TOKEN_PREFIX}${platform}.json` });
     if (blobs.length === 0) return null;
 
-    const blob = await get(blobs[0].url, { access: "private" });
-    if (!blob) return null;
-    const text = await blob.text();
+    const result = await get(blobs[0].url, { access: "private" });
+    if (!result) return null;
+    const reader = result.stream.getReader();
+    const chunks: Uint8Array[] = [];
+    let done = false;
+    while (!done) {
+      const { value, done: d } = await reader.read();
+      if (value) chunks.push(value);
+      done = d;
+    }
+    const text = new TextDecoder().decode(Buffer.concat(chunks));
     return JSON.parse(text) as TokenData;
   } catch (err) {
     console.error(`[TOKENS] loadTokenData error for ${platform}:`, err);
