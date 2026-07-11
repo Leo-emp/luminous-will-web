@@ -6,7 +6,7 @@
 //  Requires BLOB_READ_WRITE_TOKEN env var (set in Vercel project settings)
 // ─────────────────────────────────────────────────────────────
 
-import { put, list } from "@vercel/blob";
+import { put, list, del as blobDel } from "@vercel/blob";
 
 // -- Queue entry shape (must match Python pipeline's blob_storage.py) --
 export interface QueueEntry {
@@ -34,6 +34,59 @@ export interface QueueEntry {
 
 // -- Blob path for the queue manifest --
 const QUEUE_BLOB_PATH = "queue.json";
+
+// -- Blob-based lock to prevent concurrent read-modify-write corruption --
+const LOCK_BLOB_PATH = "queue.lock";
+const LOCK_TTL_MS = 30_000;
+const LOCK_MAX_RETRIES = 10;
+const LOCK_RETRY_DELAY_MS = 500;
+
+async function acquireLock(): Promise<boolean> {
+  for (let attempt = 0; attempt < LOCK_MAX_RETRIES; attempt++) {
+    try {
+      const { blobs } = await list({ prefix: LOCK_BLOB_PATH });
+      if (blobs.length > 0) {
+        const lockAge = Date.now() - new Date(blobs[0].uploadedAt).getTime();
+        if (lockAge < LOCK_TTL_MS) {
+          await new Promise((r) => setTimeout(r, LOCK_RETRY_DELAY_MS * (attempt + 1)));
+          continue;
+        }
+      }
+      await put(LOCK_BLOB_PATH, JSON.stringify({ ts: Date.now() }), {
+        access: "public",
+        contentType: "application/json",
+        addRandomSuffix: false,
+      });
+      return true;
+    } catch {
+      await new Promise((r) => setTimeout(r, LOCK_RETRY_DELAY_MS));
+    }
+  }
+  return false;
+}
+
+async function releaseLock(): Promise<void> {
+  try {
+    const { blobs } = await list({ prefix: LOCK_BLOB_PATH });
+    if (blobs.length > 0) {
+      await blobDel(blobs[0].url);
+    }
+  } catch {
+    // Best effort — TTL will expire the stale lock
+  }
+}
+
+async function withQueueLock<T>(fn: () => Promise<T>): Promise<T> {
+  const acquired = await acquireLock();
+  if (!acquired) {
+    throw new Error("[QUEUE] Failed to acquire lock after retries");
+  }
+  try {
+    return await fn();
+  } finally {
+    await releaseLock();
+  }
+}
 
 export async function loadQueue(): Promise<QueueEntry[]> {
   // Reads queue.json from Vercel Blob
@@ -85,12 +138,24 @@ export async function updateEntry(
   updates: Partial<QueueEntry>
 ): Promise<QueueEntry | null> {
   // Updates a single entry and saves the full queue back
-  const entries = await loadQueue();
-  const idx = entries.findIndex((e) => e.id === id);
-  if (idx === -1) return null;
+  // Wrapped in lock to prevent concurrent read-modify-write corruption
+  return withQueueLock(async () => {
+    const entries = await loadQueue();
+    const idx = entries.findIndex((e) => e.id === id);
+    if (idx === -1) return null;
 
-  // -- Merge updates into the entry --
-  entries[idx] = { ...entries[idx], ...updates };
-  await saveQueue(entries);
-  return entries[idx];
+    // -- Merge updates into the entry --
+    entries[idx] = { ...entries[idx], ...updates };
+    await saveQueue(entries);
+    return entries[idx];
+  });
+}
+
+export async function addEntry(entry: QueueEntry): Promise<void> {
+  // Adds a new entry to the queue with lock protection
+  await withQueueLock(async () => {
+    const entries = await loadQueue();
+    entries.push(entry);
+    await saveQueue(entries);
+  });
 }

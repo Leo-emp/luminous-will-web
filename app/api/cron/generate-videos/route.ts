@@ -9,7 +9,8 @@
 // ─────────────────────────────────────────────────────────────
 
 import { NextResponse } from "next/server";
-import { loadQueue, saveQueue } from "@/lib/queue";
+import { addEntry } from "@/lib/queue";
+import type { QueueEntry } from "@/lib/queue";
 import { getAutoApprove } from "@/lib/settings";
 import { CONTENT_TYPES, CONTENT_TYPE_COLORS } from "@/lib/content-types";
 import { notifyAdmin } from "@/lib/notify-admin";
@@ -60,12 +61,24 @@ export async function GET(request: Request) {
   const autoApprove = await getAutoApprove();
   const results: { type: string; success: boolean; error?: string }[] = [];
 
-  // FIX 5: Hoist the Gradio import and connection outside the loop.
-  // Previously, Client.connect() was called once per content type, opening a
-  // new WebSocket/HTTP connection each iteration — wasteful and slow.
-  // A single connection handles all predictions for today's batch.
+  // Retry wrapper for HF Space calls — handles cold starts within Vercel's 60s limit
+  async function withRetry<T>(fn: () => Promise<T>, label: string, maxRetries = 3): Promise<T> {
+    const delays = [3000, 6000, 12000];
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (err) {
+        if (attempt === maxRetries) throw err;
+        const delay = delays[attempt] || 12000;
+        console.log(`[CRON] ${label} attempt ${attempt + 1} failed, retrying in ${delay / 1000}s...`);
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
+    throw new Error("Unreachable");
+  }
+
   const { Client } = await import("@gradio/client");
-  const client = await Client.connect(hfSpaceUrl);
+  const client = await withRetry(() => Client.connect(hfSpaceUrl), "HF connect");
 
   // -- Generate one video per content type --
   for (const typeKey of todaysTypes) {
@@ -80,12 +93,15 @@ export async function GET(request: Request) {
       console.log(`[CRON] Generating ${typeInfo.name} video...`);
 
       // Call with content type — topic is "(Random)" so the pipeline picks one
-      const result = await client.predict("/on_generate", {
-        content_type_key: typeKey,
-        format_choice: "Vertical Short (9:16)",
-        dropdown_topic: "(Random)",
-        custom: "",
-      });
+      const result = await withRetry(
+        () => client.predict("/on_generate", {
+          content_type_key: typeKey,
+          format_choice: "Vertical Short (9:16)",
+          dropdown_topic: "(Random)",
+          custom: "",
+        }),
+        `predict ${typeKey}`
+      );
 
       // -- Parse the Gradio response --
       // data[0] = video file object (has .url), data[1] = status/log string
@@ -95,11 +111,8 @@ export async function GET(request: Request) {
         const videoUrl = typeof data[0] === "object" && data[0].url ? data[0].url : null;
 
         if (videoUrl) {
-          // -- Add to queue --
-          const queue = await loadQueue();
-
           // Build the new entry with all required fields
-          const newEntry = {
+          const newEntry: QueueEntry = {
             id: `auto-${Date.now()}-${typeKey}`,
             format: "short" as const,
             content_type: typeKey,
@@ -114,8 +127,8 @@ export async function GET(request: Request) {
             target_platforms: ["youtube", "tiktok", "instagram", "facebook"],
           };
 
-          queue.push(newEntry);
-          await saveQueue(queue);
+          // Lock-protected queue write prevents concurrent corruption
+          await addEntry(newEntry);
 
           console.log(`[CRON] ${typeInfo.name} video added to queue (${newEntry.status})`);
           results.push({ type: typeKey, success: true });

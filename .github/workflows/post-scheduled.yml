@@ -1,0 +1,24 @@
+# Triggers /api/cron/post-scheduled every 5 minutes.
+# Vercel Hobby limits cron to once/day, so we use GitHub Actions
+# to check for approved posts that are due for publishing.
+name: Post Scheduled Videos
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  trigger-post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger post-scheduled endpoint
+        run: |
+          response=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.APP_URL }}/api/cron/post-scheduled")
+          echo "Response: $response"
+          if [ "$response" -ge 500 ]; then
+            echo "Server error — endpoint returned $response"
+            exit 1
+          fi
