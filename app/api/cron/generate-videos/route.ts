@@ -12,6 +12,7 @@ import { NextResponse } from "next/server";
 import { loadQueue, saveQueue } from "@/lib/queue";
 import { getAutoApprove } from "@/lib/settings";
 import { CONTENT_TYPES, CONTENT_TYPE_COLORS } from "@/lib/content-types";
+import { notifyAdmin } from "@/lib/notify-admin";
 
 // -- Content type rotation schedule --
 // Odd days  → dark_motivation + stoic_philosophy
@@ -49,6 +50,10 @@ export async function GET(request: Request) {
       { status: 500 }
     );
   }
+
+  // # Top-level try/catch — catches fatal errors from getAutoApprove() or Client.connect()
+  // # that previously would crash with an unhandled exception
+  try {
 
   // -- Determine today's content types and global settings --
   const todaysTypes = getTodaysTypes();
@@ -127,6 +132,8 @@ export async function GET(request: Request) {
       const msg = error instanceof Error ? error.message : String(error);
       console.error(`[CRON] Failed to generate ${typeKey}: ${msg}`);
       results.push({ type: typeKey, success: false, error: msg });
+      // # Alert admin for each failed video generation
+      await notifyAdmin("Generate Videos", error, { contentType: typeKey });
     }
   }
 
@@ -136,4 +143,14 @@ export async function GET(request: Request) {
     auto_approve: autoApprove,
     types_today: todaysTypes,
   });
+
+  } catch (err) {
+    // # Fatal error (e.g. Client.connect() failed, getAutoApprove() crashed)
+    console.error("[GenerateVideos] Fatal error:", err);
+    await notifyAdmin("Generate Videos", err, { fatal: true });
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Unknown error" },
+      { status: 500 }
+    );
+  }
 }
