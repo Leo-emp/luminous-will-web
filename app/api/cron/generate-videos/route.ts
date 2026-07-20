@@ -14,6 +14,10 @@ import type { QueueEntry } from "@/lib/queue";
 import { getAutoApprove } from "@/lib/settings";
 import { CONTENT_TYPES, CONTENT_TYPE_COLORS } from "@/lib/content-types";
 import { notifyAdmin } from "@/lib/notify-admin";
+// # Import scheduling utility so auto-approved entries get a post time
+// # Without this, the post-scheduled cron ignores them (it requires
+// # both status === "approved" AND scheduled_post_time to be set)
+import { computeScheduledTime } from "@/lib/schedule-time";
 
 // -- Content type rotation schedule --
 // Odd days  → dark_motivation + stoic_philosophy
@@ -125,6 +129,13 @@ export async function GET(request: Request) {
             video_url: videoUrl,
             // Default to all 4 platforms — user can adjust before posting
             target_platforms: ["youtube", "tiktok", "instagram", "facebook"],
+            // # AUTO-SCHEDULING FIX: When auto-approve is ON, we MUST set
+            // # scheduled_post_time so the post-scheduled cron can find this entry.
+            // # Without this, the cron filters out entries missing this field,
+            // # and auto-approved videos would sit in "approved" limbo forever.
+            // # When auto-approve is OFF (pending_review), leave it null —
+            // # the user will set it when they manually approve.
+            scheduled_post_time: autoApprove ? computeScheduledTime() : null,
           };
 
           // Lock-protected queue write prevents concurrent corruption
