@@ -167,84 +167,136 @@ export default function Home() {
 
   // ─────────────────────────────────────────────────────────────
   //  handleGenerate
-  //  Connects to the Gradio space and triggers video generation.
-  //  Passes the content_type_key so the backend knows which
-  //  pipeline style to apply.
+  //  Calls the HF Space directly from the browser using @gradio/client.
+  //  This avoids Vercel's 60s serverless function timeout — browser
+  //  connections can stay open for the full 3-8 minutes the pipeline needs.
+  //  Includes retry logic for when the Space is sleeping or rebuilding.
   // ─────────────────────────────────────────────────────────────
+  const HF_SPACE_URL = "https://leoemp-luminous-will.hf.space";
+
   const handleGenerate = async () => {
     setState("connecting");
     setProgress(0);
-    setStatusText("Connecting to Luminous Will server...");
+    setStatusText("Waking up server (may take 30-60s if sleeping)...");
     setVideoUrl(null);
     setVideoInfo("");
     setErrorMsg("");
     startTimer();
 
-    try {
-      setState("generating");
-      setStatusText("Starting video generation...");
+    // --- Simulate progress steps while the pipeline runs ---
+    // @gradio/client doesn't expose granular backend progress,
+    // so we advance through STEPS on a ~15s interval as a visual indicator.
+    let stepIndex = 0;
+    let progressInterval: ReturnType<typeof setInterval> | null = null;
 
-      // --- Simulate progress steps while the pipeline runs ---
-      // The server-side call doesn't expose granular backend progress,
-      // so we advance through STEPS on a ~15s interval as a visual indicator.
-      let stepIndex = 0;
-      const progressInterval = setInterval(() => {
+    try {
+      // --- Step 1: Connect to the HF Space ---
+      // Dynamic import keeps the bundle smaller (only loaded when user clicks Generate)
+      // HF Spaces auto-handle CORS for Gradio clients
+      const { Client } = await import("@gradio/client");
+
+      // --- Retry loop: Space may be sleeping, rebuilding, or temporarily down ---
+      // Free HF Spaces sleep after 48h of inactivity; waking takes 30-60s.
+      // We retry up to 3 times with increasing delays to handle this.
+      const MAX_RETRIES = 3;
+      let client: any = null;
+      let lastError: Error | null = null;
+
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          setStatusText(
+            attempt === 1
+              ? "Connecting to Luminous Will server..."
+              : `Reconnecting (attempt ${attempt}/${MAX_RETRIES})...`
+          );
+          // # hf_token not needed — this is a public Space
+          client = await Client.connect(HF_SPACE_URL);
+          break; // # Connected successfully
+        } catch (connectErr) {
+          lastError = connectErr instanceof Error ? connectErr : new Error(String(connectErr));
+          if (attempt < MAX_RETRIES) {
+            // # Wait before retrying: 10s, 20s (Space might be waking up)
+            const waitSec = attempt * 10;
+            setStatusText(`Server not ready. Retrying in ${waitSec}s... (${attempt}/${MAX_RETRIES})`);
+            await new Promise((r) => setTimeout(r, waitSec * 1000));
+          }
+        }
+      }
+
+      if (!client) {
+        // # All connection attempts failed
+        throw new Error(
+          `Could not connect to the video server after ${MAX_RETRIES} attempts. ` +
+          `The HF Space may be down or rebuilding. ` +
+          `Last error: ${lastError?.message || "Unknown"}`
+        );
+      }
+
+      // --- Step 2: Start the video generation pipeline ---
+      setState("generating");
+      setProgress(5);
+      setStatusText("Generating script & voiceover...");
+
+      progressInterval = setInterval(() => {
         if (stepIndex < STEPS.length - 1) {
           stepIndex++;
           setProgress(STEPS[stepIndex].progress);
           setStatusText(STEPS[stepIndex].label);
         }
-      }, 15000); // advance every ~15 seconds
+      }, 15000); // # advance every ~15 seconds
 
-      setProgress(5);
-      setStatusText("Generating script & voiceover...");
-
-      // --- Call our server-side API route (avoids browser CORS issues) ---
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          content_type_key: contentType,
-          format_choice: videoFormat === "long" ? "Horizontal Long (16:9)" : "Vertical Short (9:16)",
-          dropdown_topic: customTopic.trim() ? "(Random)" : (selectedTopic || "(Random)"),
-          custom: customTopic.trim() || "",
-        }),
+      // --- Call the Gradio endpoint ---
+      // content_type_key tells the backend which content type pipeline to use
+      // dropdown_topic is "(Random)" when a custom topic is typed
+      // custom is the user-entered custom topic string
+      const result = await client.predict("/on_generate", {
+        content_type_key: contentType,
+        format_choice: videoFormat === "long" ? "Horizontal Long (16:9)" : "Vertical Short (9:16)",
+        dropdown_topic: customTopic.trim() ? "(Random)" : (selectedTopic || "(Random)"),
+        custom: customTopic.trim() || "",
       });
 
       clearInterval(progressInterval);
+      progressInterval = null;
       stopTimer();
 
-      // --- Parse response safely — HF Space may return non-JSON error pages ---
-      let data: any;
-      const responseText = await res.text();
-      try {
-        data = JSON.parse(responseText);
-      } catch {
-        // # Non-JSON response means HF Space is down, rebuilding, or crashed
-        throw new Error(
-          responseText.length > 120
-            ? responseText.slice(0, 120) + "..."
-            : responseText || "HF Space returned an empty response"
-        );
-      }
+      // --- Parse and display the result ---
+      const data = result.data as [{ url: string } | null, string];
+      if (data && data[0]) {
+        const videoData = data[0];
+        // # The URL may come back as an object { url } or a raw string
+        const videoSrc =
+          typeof videoData === "object" && videoData.url
+            ? videoData.url
+            : typeof videoData === "string"
+            ? videoData
+            : null;
 
-      if (!res.ok) {
-        throw new Error(data.error || "Server error");
-      }
-
-      if (data.videoUrl) {
-        setVideoUrl(data.videoUrl);
-        setVideoInfo(data.info || "");
-        setProgress(100);
-        setStatusText("Video ready!");
-        setState("done");
+        if (videoSrc) {
+          setVideoUrl(videoSrc);
+          setVideoInfo(typeof data[1] === "string" ? data[1] : "");
+          setProgress(100);
+          setStatusText("Video ready!");
+          setState("done");
+        } else {
+          throw new Error("Server returned a result but no video URL was found.");
+        }
       } else {
-        throw new Error("No video URL in response");
+        throw new Error("Server returned an empty response. The pipeline may have crashed — check HF Space logs.");
       }
     } catch (err) {
+      if (progressInterval) clearInterval(progressInterval);
       stopTimer();
       const message = err instanceof Error ? err.message : "Unknown error";
-      setErrorMsg(message);
+      // # Clean up common Gradio error messages to be more user-friendly
+      const friendlyMsg = message.includes("Could not connect")
+        ? message
+        : message.includes("No space")
+        ? "HF Space not found. Check that the Space URL is correct and the Space is running."
+        : message.includes("queue")
+        ? "Server is busy. Try again in a minute."
+        : message;
+      setErrorMsg(friendlyMsg);
       setState("error");
       setStatusText("");
     }
