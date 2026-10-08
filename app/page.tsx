@@ -105,9 +105,6 @@ const TOPICS_BY_TYPE: Record<ContentTypeKey, string[]> = {
   ],
 };
 
-// --- HF Space URL (set via Vercel env var) ---
-const HF_SPACE_URL = process.env.NEXT_PUBLIC_HF_SPACE_URL || "";
-
 // --- Generation state type ---
 type GenerationState = "idle" | "connecting" | "generating" | "done" | "error";
 
@@ -175,15 +172,6 @@ export default function Home() {
   //  pipeline style to apply.
   // ─────────────────────────────────────────────────────────────
   const handleGenerate = async () => {
-    // Guard: HF Space URL must be configured
-    if (!HF_SPACE_URL) {
-      setErrorMsg(
-        "HF Space URL not configured. Set NEXT_PUBLIC_HF_SPACE_URL in your Vercel environment variables."
-      );
-      setState("error");
-      return;
-    }
-
     setState("connecting");
     setProgress(0);
     setStatusText("Connecting to Luminous Will server...");
@@ -193,16 +181,11 @@ export default function Home() {
     startTimer();
 
     try {
-      // --- Dynamic import of Gradio client (keeps bundle smaller) ---
-      const { Client } = await import("@gradio/client");
-
       setState("generating");
       setStatusText("Starting video generation...");
 
-      const client = await Client.connect(HF_SPACE_URL);
-
       // --- Simulate progress steps while the pipeline runs ---
-      // The Gradio JS client doesn't expose granular backend progress,
+      // The server-side call doesn't expose granular backend progress,
       // so we advance through STEPS on a ~15s interval as a visual indicator.
       let stepIndex = 0;
       const progressInterval = setInterval(() => {
@@ -216,43 +199,47 @@ export default function Home() {
       setProgress(5);
       setStatusText("Generating script & voiceover...");
 
-      // --- Call the Gradio endpoint ---
-      // content_type_key tells the backend which content type pipeline to use
-      // dropdown_topic is "(Random)" when a custom topic is typed
-      // custom is the user-entered custom topic string
-      const result = await client.predict("/on_generate", {
-        content_type_key: contentType,
-        format_choice: videoFormat === "long" ? "Horizontal Long (16:9)" : "Vertical Short (9:16)",
-        dropdown_topic: customTopic.trim() ? "(Random)" : (selectedTopic || "(Random)"),
-        custom: customTopic.trim() || "",
+      // --- Call our server-side API route (avoids browser CORS issues) ---
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content_type_key: contentType,
+          format_choice: videoFormat === "long" ? "Horizontal Long (16:9)" : "Vertical Short (9:16)",
+          dropdown_topic: customTopic.trim() ? "(Random)" : (selectedTopic || "(Random)"),
+          custom: customTopic.trim() || "",
+        }),
       });
 
       clearInterval(progressInterval);
       stopTimer();
 
-      // --- Parse and display the result ---
-      const data = result.data as [{ url: string } | null, string];
-      if (data && data[0]) {
-        const videoData = data[0];
-        // The URL may come back as an object { url } or a raw string
-        const videoSrc =
-          typeof videoData === "object" && videoData.url
-            ? videoData.url
-            : typeof videoData === "string"
-            ? videoData
-            : null;
+      // --- Parse response safely — HF Space may return non-JSON error pages ---
+      let data: any;
+      const responseText = await res.text();
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        // # Non-JSON response means HF Space is down, rebuilding, or crashed
+        throw new Error(
+          responseText.length > 120
+            ? responseText.slice(0, 120) + "..."
+            : responseText || "HF Space returned an empty response"
+        );
+      }
 
-        if (videoSrc) {
-          setVideoUrl(videoSrc);
-          setVideoInfo(typeof data[1] === "string" ? data[1] : "");
-          setProgress(100);
-          setStatusText("Video ready!");
-          setState("done");
-        } else {
-          throw new Error("No video URL in response");
-        }
+      if (!res.ok) {
+        throw new Error(data.error || "Server error");
+      }
+
+      if (data.videoUrl) {
+        setVideoUrl(data.videoUrl);
+        setVideoInfo(data.info || "");
+        setProgress(100);
+        setStatusText("Video ready!");
+        setState("done");
       } else {
-        throw new Error("Empty response from server");
+        throw new Error("No video URL in response");
       }
     } catch (err) {
       stopTimer();
